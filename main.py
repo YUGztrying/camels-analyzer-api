@@ -7,9 +7,16 @@ import os
 import shutil
 from datetime import datetime
 from llm_service import extract_bank_data_from_file
-
+from camels_calculator import calculate_all_ratios, rate_capital, rate_asset_quality, rate_earnings, rate_liquidity, get_composite_rating
+from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
-
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # En prod, mets l'URL exacte du frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ===== MODÈLES PYDANTIC =====
 
@@ -39,7 +46,12 @@ def home():
 @app.post("/banks", response_model=BankResponse)
 def create_bank(bank: Bank, db: Session = Depends(get_db)):
     """Crée une banque dans PostgreSQL"""
-    db_bank = BankDB(**bank.model_dump())
+    db_bank = BankDB(
+        bank_name=bank.name,
+        country=bank.country,
+        total_assets=bank.total_assets,
+        currency=bank.currency
+    )
     db.add(db_bank)
     db.commit()
     db.refresh(db_bank)
@@ -66,20 +78,13 @@ def get_bank(bank_id: int, db: Session = Depends(get_db)):
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """
-    Upload un fichier (PDF, CSV, image)
-    Le fichier est sauvegardé dans le dossier uploads/
-    """
-    # Créer le dossier uploads s'il n'existe pas
+    """Upload un fichier simple"""
     os.makedirs("uploads", exist_ok=True)
     
-    # Générer un nom unique avec timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_extension = file.filename.split(".")[-1]
     unique_filename = f"{timestamp}_{file.filename}"
     file_path = f"uploads/{unique_filename}"
     
-    # Sauvegarder le fichier
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
@@ -100,15 +105,14 @@ def list_files():
         return {"files": [], "total": 0}
     
     files = os.listdir("uploads")
-    return {
-        "total": len(files),
-        "files": files
-    }
+    return {"total": len(files), "files": files}
+
+
 @app.post("/upload-and-extract")
 async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """
-    Upload un fichier ET extrait automatiquement les données avec Claude.
-    Puis crée la banque automatiquement !
+    Upload un fichier ET extrait automatiquement TOUTES les données CAMELS avec Claude.
+    Puis crée la banque automatiquement avec TOUS les champs !
     """
     # 1. Sauvegarder le fichier
     os.makedirs("uploads", exist_ok=True)
@@ -119,17 +123,69 @@ async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
-    # 2. Extraire les données avec Claude
+    # 2. Extraire TOUTES les données avec Claude
     try:
-        extracted_data = extract_bank_data_from_file(file_path)  # Au lieu de extract_bank_data_from_image
+        extracted_data = extract_bank_data_from_file(file_path)
         
-        # 3. Créer la banque automatiquement
+        # 3. Créer la banque avec TOUS les champs extraits
         db_bank = BankDB(
-            name=extracted_data.get("name", "Inconnu"),
+            bank_name=extracted_data.get("name", "Inconnu"),
             country=extracted_data.get("country", "Inconnu"),
+            fiscal_year=extracted_data.get("fiscal_year"),
+            currency=extracted_data.get("currency", "XOF"),
+            file_urls=file_path,
+            
+            # Actifs
             total_assets=extracted_data.get("total_assets", 0),
-            currency="XOF"
+            cash_reserves_requirements=extracted_data.get("cash_reserves_requirements"),
+            due_from_banks=extracted_data.get("due_from_banks"),
+            investment_securities=extracted_data.get("investment_securities"),
+            gross_loans=extracted_data.get("gross_loans"),
+            loan_loss_provisions=extracted_data.get("loan_loss_provisions"),
+            foreclosed_assets=extracted_data.get("foreclosed_assets"),
+            investment_in_subs_affiliates=extracted_data.get("investment_in_subs_affiliates"),
+            other_assets=extracted_data.get("other_assets"),
+            fixed_assets=extracted_data.get("fixed_assets"),
+            
+            # Passifs
+            deposits=extracted_data.get("deposits"),
+            interbank_liabilities=extracted_data.get("interbank_liabilities"),
+            other_liabilities=extracted_data.get("other_liabilities"),
+            total_liabilities=extracted_data.get("total_liabilities"),
+            
+            # Equity
+            paid_in_capital=extracted_data.get("paid_in_capital"),
+            reserves=extracted_data.get("reserves"),
+            retained_earnings=extracted_data.get("retained_earnings"),
+            net_profit=extracted_data.get("net_profit"),
+            total_equity=extracted_data.get("total_equity"),
+            
+            # Compte de résultat
+            interest_income=extracted_data.get("interest_income"),
+            interest_expenses=extracted_data.get("interest_expenses"),
+            net_interest_income=extracted_data.get("net_interest_income"),
+            non_interest_income_commissions=extracted_data.get("non_interest_income_commissions"),
+            net_income_investment=extracted_data.get("net_income_investment"),
+            other_net_income=extracted_data.get("other_net_income"),
+            operating_expenses=extracted_data.get("operating_expenses"),
+            operating_profit=extracted_data.get("operating_profit"),
+            provision_expenses=extracted_data.get("provision_expenses"),
+            non_operating_profit_loss=extracted_data.get("non_operating_profit_loss"),
+            income_tax=extracted_data.get("income_tax"),
+            net_income=extracted_data.get("net_income"),
+            
+            # Ratios CAMELS
+            car_regulatory=extracted_data.get("car_regulatory"),
+            car_bank_reported=extracted_data.get("car_bank_reported"),
+            problem_assets_mn=extracted_data.get("problem_assets_mn"),
+            npls_mn=extracted_data.get("npls_mn"),
+            llr_mn=extracted_data.get("llr_mn"),
+            
+            # Taux de change
+            fx_rate_period_end=extracted_data.get("fx_rate_period_end"),
+            fx_rate_period_avg=extracted_data.get("fx_rate_period_avg")
         )
+        
         db.add(db_bank)
         db.commit()
         db.refresh(db_bank)
@@ -138,12 +194,7 @@ async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends
             "message": "✅ Fichier uploadé, données extraites et banque créée !",
             "file": unique_filename,
             "extracted_data": extracted_data,
-            "bank_created": {
-                "id": db_bank.id,
-                "name": db_bank.name,
-                "country": db_bank.country,
-                "total_assets": db_bank.total_assets
-            }
+            "bank_id": db_bank.id
         }
     
     except Exception as e:
@@ -152,3 +203,213 @@ async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends
             "file": unique_filename,
             "error": str(e)
         }
+@app.get("/banks/{bank_id}/calculate")
+def calculate_ratios(bank_id: int, db: Session = Depends(get_db)):
+    """
+    Calcule TOUS les ratios CAMELS pour une banque.
+    Met à jour la banque en DB avec les ratios calculés.
+    """
+    bank = db.query(BankDB).filter(BankDB.id == bank_id).first()
+    
+    if not bank:
+        return {"error": "Banque introuvable"}
+    
+    # Calculer tous les ratios
+    bank = calculate_all_ratios(bank)
+    
+    # Sauvegarder en DB
+    db.commit()
+    db.refresh(bank)
+    
+    return {
+        "message": "✅ Ratios calculés et sauvegardés !",
+        "bank_id": bank.id,
+        "bank_name": bank.bank_name,
+        "ratios_calculated": {
+            "capital": {
+                "equity_assets": bank.equity_assets,
+                "car_regulatory": bank.car_regulatory
+            },
+            "asset_quality": {
+                "npl_ratio": bank.npl_ratio,
+                "coverage_ratio": bank.coverage_ratio,
+                "llr_avg_loan": bank.llr_avg_loan
+            },
+            "earnings": {
+                "roae": bank.roae,
+                "roaa": bank.roaa,
+                "net_interest_margin": bank.net_interest_margin,
+                "cost_to_income": bank.cost_to_income
+            },
+            "liquidity": {
+                "cash_reserves_assets": bank.cash_reserves_assets,
+                "gross_loans_deposits": bank.gross_loans_deposits
+            }
+        }
+    }
+
+
+@app.get("/banks/{bank_id}/rating")
+def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
+    """
+    Génère le RATING CAMELS complet pour une banque.
+    Note chaque pilier (C, A, E, L) et donne un rating composite.
+    """
+    bank = db.query(BankDB).filter(BankDB.id == bank_id).first()
+    
+    if not bank:
+        return {"error": "Banque introuvable"}
+    
+    # Calculer les ratios d'abord (au cas où)
+    bank = calculate_all_ratios(bank)
+    db.commit()
+    
+    # Noter chaque pilier
+    ratings = {
+        "capital": rate_capital(bank),
+        "asset_quality": rate_asset_quality(bank),
+        "earnings": rate_earnings(bank),
+        "liquidity": rate_liquidity(bank),
+        "management": {"rating": None, "status": "Manual assessment required"}
+    }
+    
+    # Rating composite
+    composite = get_composite_rating(ratings)
+    
+    return {
+        "bank_id": bank.id,
+        "bank_name": bank.bank_name,
+        "fiscal_year": bank.fiscal_year,
+        "country": bank.country,
+        "camels_ratings": ratings,
+        "composite_rating": composite,
+        "summary": {
+            "total_assets": bank.total_assets,
+            "total_equity": bank.total_equity,
+            "net_income": bank.net_income,
+            "car": bank.car_regulatory or bank.car_bank_reported,
+            "roae": bank.roae,
+            "npl_ratio": bank.npl_ratio
+        }
+    }
+
+
+@app.post("/upload-and-analyze")
+async def upload_and_analyze(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """
+    🔥 ROUTE ULTIME : Upload + Extract + Calculate + Rate
+    
+    Fait TOUT en un seul appel :
+    1. Upload le fichier
+    2. Extrait les données avec Claude
+    3. Calcule tous les ratios
+    4. Génère le rating CAMELS
+    5. Sauvegarde tout en DB
+    """
+    # 1. Upload
+    os.makedirs("uploads", exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    unique_filename = f"{timestamp}_{file.filename}"
+    file_path = f"uploads/{unique_filename}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    try:
+        # 2. Extraction avec Claude
+        extracted_data = extract_bank_data_from_file(file_path)
+        
+        # 3. Créer la banque
+        db_bank = BankDB(
+            bank_name=extracted_data.get("name", "Inconnu"),
+            country=extracted_data.get("country", "Inconnu"),
+            fiscal_year=extracted_data.get("fiscal_year"),
+            currency=extracted_data.get("currency", "XOF"),
+            file_urls=file_path,
+            
+            # Tous les champs...
+            total_assets=extracted_data.get("total_assets", 0),
+            cash_reserves_requirements=extracted_data.get("cash_reserves_requirements"),
+            due_from_banks=extracted_data.get("due_from_banks"),
+            investment_securities=extracted_data.get("investment_securities"),
+            gross_loans=extracted_data.get("gross_loans"),
+            loan_loss_provisions=extracted_data.get("loan_loss_provisions"),
+            foreclosed_assets=extracted_data.get("foreclosed_assets"),
+            investment_in_subs_affiliates=extracted_data.get("investment_in_subs_affiliates"),
+            other_assets=extracted_data.get("other_assets"),
+            fixed_assets=extracted_data.get("fixed_assets"),
+            deposits=extracted_data.get("deposits"),
+            interbank_liabilities=extracted_data.get("interbank_liabilities"),
+            other_liabilities=extracted_data.get("other_liabilities"),
+            total_liabilities=extracted_data.get("total_liabilities"),
+            paid_in_capital=extracted_data.get("paid_in_capital"),
+            reserves=extracted_data.get("reserves"),
+            retained_earnings=extracted_data.get("retained_earnings"),
+            net_profit=extracted_data.get("net_profit"),
+            total_equity=extracted_data.get("total_equity"),
+            interest_income=extracted_data.get("interest_income"),
+            interest_expenses=extracted_data.get("interest_expenses"),
+            net_interest_income=extracted_data.get("net_interest_income"),
+            non_interest_income_commissions=extracted_data.get("non_interest_income_commissions"),
+            net_income_investment=extracted_data.get("net_income_investment"),
+            other_net_income=extracted_data.get("other_net_income"),
+            operating_expenses=extracted_data.get("operating_expenses"),
+            operating_profit=extracted_data.get("operating_profit"),
+            provision_expenses=extracted_data.get("provision_expenses"),
+            non_operating_profit_loss=extracted_data.get("non_operating_profit_loss"),
+            income_tax=extracted_data.get("income_tax"),
+            net_income=extracted_data.get("net_income"),
+            car_regulatory=extracted_data.get("car_regulatory"),
+            car_bank_reported=extracted_data.get("car_bank_reported"),
+            problem_assets_mn=extracted_data.get("problem_assets_mn"),
+            npls_mn=extracted_data.get("npls_mn"),
+            llr_mn=extracted_data.get("llr_mn"),
+            fx_rate_period_end=extracted_data.get("fx_rate_period_end"),
+            fx_rate_period_avg=extracted_data.get("fx_rate_period_avg")
+        )
+        
+        # 4. Calculer les ratios
+        db_bank = calculate_all_ratios(db_bank)
+        
+        # 5. Sauvegarder
+        db.add(db_bank)
+        db.commit()
+        db.refresh(db_bank)
+        
+        # 6. Générer le rating
+        ratings = {
+            "capital": rate_capital(db_bank),
+            "asset_quality": rate_asset_quality(db_bank),
+            "earnings": rate_earnings(db_bank),
+            "liquidity": rate_liquidity(db_bank)
+        }
+        composite = get_composite_rating(ratings)
+        
+        return {
+            "message": "🎉 ANALYSE COMPLÈTE TERMINÉE !",
+            "file": unique_filename,
+            "bank": {
+                "id": db_bank.id,
+                "name": db_bank.bank_name,
+                "country": db_bank.country,
+                "fiscal_year": db_bank.fiscal_year
+            },
+            "camels_rating": composite,
+            "detailed_ratings": ratings,
+            "key_metrics": {
+                "total_assets": db_bank.total_assets,
+                "car": db_bank.car_regulatory,
+                "roae": db_bank.roae,
+                "roaa": db_bank.roaa,
+                "npl_ratio": db_bank.npl_ratio,
+                "loans_deposits": db_bank.gross_loans_deposits
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "message": "❌ Erreur lors de l'analyse",
+            "file": unique_filename,
+            "error": str(e)
+        }
+    
