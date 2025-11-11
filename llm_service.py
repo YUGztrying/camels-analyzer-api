@@ -204,6 +204,51 @@ FORMAT DE RÉPONSE (JSON UNIQUEMENT, AUCUN TEXTE):
         for page in reader.pages:
             text += page.extract_text()
         
+        # Si le texte est vide ou trop court, le PDF est probablement scanné
+        if len(text.strip()) < 100:
+            print("⚠️ PDF scanné détecté, conversion en image...")
+            from pdf2image import convert_from_path
+            
+            # Convertir première page en image
+            images = convert_from_path(file_path, first_page=1, last_page=1)
+            print(f"✅ {len(images)} page(s) convertie(s)")
+            if images:
+                # Sauvegarder temporairement
+                temp_image = file_path.replace('.pdf', '_temp.png')
+                images[0].save(temp_image, 'PNG')
+                print(f"✅ Image sauvegardée: {temp_image}")
+                # Envoyer comme image
+                with open(temp_image, "rb") as f:
+                    file_data = base64.standard_b64encode(f.read()).decode("utf-8")
+                print(f"✅ Image encodée: {len(file_data)} chars")
+                message = client.messages.create(
+                    model="claude-3-5-haiku-20241022",
+                    max_tokens=4096,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": file_data}},
+                            {"type": "text", "text": prompt}
+                        ]
+                    }]
+                )
+                print("✅ Message envoyé à Claude")
+                os.remove(temp_image)
+                # Supprimer temp
+                os.remove(temp_image)
+            else:
+                raise Exception("Impossible de convertir le PDF")
+        else:
+            # PDF avec texte extractible
+            message = client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=4096,
+                messages=[{
+                    "role": "user",
+                    "content": f"{prompt}\n\nDocument:\n\n{text[:50000]}"
+                }]
+            )
+        
         # AUGMENTÉ: Envoie TOUT le texte, pas seulement 15000 chars
         message = client.messages.create(
             model="claude-3-5-haiku-20241022",
@@ -255,15 +300,36 @@ FORMAT DE RÉPONSE (JSON UNIQUEMENT, AUCUN TEXTE):
     
     # Parser la réponse
     response_text = message.content[0].text
-    
+    print("=" * 80)
+    print("RÉPONSE CLAUDE:")
+    print(response_text)
+    print("=" * 80)
     # Extraire le JSON
+   # Extraire le JSON
     if "```json" in response_text:
         json_str = response_text.split("```json")[1].split("```")[0].strip()
     elif "```" in response_text:
         json_str = response_text.split("```")[1].split("```")[0].strip()
     else:
-        json_str = response_text.strip()
+        # Cherche le premier { et le dernier }
+        start = response_text.find('{')
+        end = response_text.rfind('}') + 1
+        if start != -1 and end > start:
+            json_str = response_text[start:end]
+        else:
+            json_str = response_text.strip()
+
+        print("JSON EXTRAIT:")
+    print(json_str)
+    print("=" * 80)
     
-    extracted_data = json.loads(json_str)
-    
-    return extracted_data
+    try:
+        extracted_data = json.loads(json_str)
+        print("✅ JSON parsé avec succès")
+        print(f"Type: {type(extracted_data)}")
+        print(f"Keys: {list(extracted_data.keys())[:5]}")  # Premiers 5 keys
+        return extracted_data
+    except Exception as e:
+        print(f"❌ ERREUR JSON PARSE: {e}")
+        print(f"json_str = {json_str[:200]}")
+        raise

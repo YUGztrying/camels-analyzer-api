@@ -14,7 +14,16 @@ def calculate_all_ratios(bank, prev_bank=None):
     Returns:
         L'objet bank avec tous les ratios calculés
     """
-    
+    print("=" * 80)
+    print("DÉBUT CALCUL RATIOS")
+    print(f"Banque: {getattr(bank, 'bank_name', 'Unknown')}")
+    print(f"Total Assets: {getattr(bank, 'total_assets', None)}")
+    print(f"Total Equity: {getattr(bank, 'total_equity', None)}")
+    print(f"Gross Loans: {getattr(bank, 'gross_loans', None)}")
+    print(f"NPLs: {getattr(bank, 'npls_mn', None)}")
+    print(f"LLR: {getattr(bank, 'llr_mn', None)}")
+    print(f"Loan Loss Provisions: {getattr(bank, 'loan_loss_provisions', None)}")
+    print("=" * 80)
     # Fonction helper pour récupérer les valeurs
     def get_val(obj, attr, default=0):
         val = getattr(obj, attr, None)
@@ -147,7 +156,13 @@ def calculate_all_ratios(bank, prev_bank=None):
     
     # ROAE = ROAA × (Assets / Equity)
     bank.roae = roaa * (bank.assets_equity or 0)
-    
+    print("=" * 80)
+    print("FIN CALCUL RATIOS")
+    print(f"equity_assets: {bank.equity_assets}")
+    print(f"npl_ratio: {bank.npl_ratio}")
+    print(f"roaa: {bank.roaa}")
+    print(f"roae: {bank.roae}")
+    print("=" * 80)
     return bank
 
 
