@@ -393,16 +393,56 @@ async def upload_and_analyze(file: UploadFile = File(...), db: Session = Depends
                 "name": db_bank.bank_name,
                 "country": db_bank.country,
                 "fiscal_year": db_bank.fiscal_year,
-                "total_equity": db_bank.total_equity,
+                
+                # Balance Sheet - Raw Data
+                "cash_reserves_requirements": db_bank.cash_reserves_requirements,
+                "due_from_banks": db_bank.due_from_banks,
+                "investment_securities": db_bank.investment_securities,
+                "gross_loans": db_bank.gross_loans,
+                "loan_loss_provisions": db_bank.loan_loss_provisions,
+                "foreclosed_assets": db_bank.foreclosed_assets,
+                "fixed_assets": db_bank.fixed_assets,
+                "other_assets": db_bank.other_assets,
                 "total_assets": db_bank.total_assets,
+                
+                "deposits": db_bank.deposits,
+                "interbank_liabilities": db_bank.interbank_liabilities,
+                "other_liabilities": db_bank.other_liabilities,
+                "total_liabilities": db_bank.total_liabilities,
+                
+                "paid_capital": db_bank.paid_in_capital,  # ✅ Corrigé
+                "reserves": db_bank.reserves,
+                "retained_earnings": db_bank.retained_earnings,
+                "net_profit": db_bank.net_profit,
+                "total_equity": db_bank.total_equity,
+                
+                # Income Statement - Raw Data
+                "interest_income": db_bank.interest_income,
+                "interest_expenses": db_bank.interest_expenses,
+                "net_interest_income": db_bank.net_interest_income,
+                "non_net_interest_income_commissions": db_bank.non_interest_income_commissions,  # ✅ Corrigé
+                "net_income_from_investment": db_bank.net_income_investment,  # ✅ Corrigé
+                "other_net_income": db_bank.other_net_income,
+                "operating_expenses": db_bank.operating_expenses,
+                "operating_profit": db_bank.operating_profit,
+                "provision_expenses": db_bank.provision_expenses,
+                "non_operating_profit_loss": db_bank.non_operating_profit_loss,
+                "income_tax": db_bank.income_tax,
+                "net_income": db_bank.net_income,
+                
+                # Asset Quality Data
                 "npls_mn": db_bank.npls_mn,
                 "llr_mn": db_bank.llr_mn,
                 "problem_assets_mn": db_bank.problem_assets_mn,
+                
+                # Calculated Ratios
+                "car_regulatory": db_bank.car_regulatory,
                 "car_bank_reported": db_bank.car_bank_reported,
                 "equity_assets": db_bank.equity_assets,
                 "cash_reserves_assets": db_bank.cash_reserves_assets,
                 "liquid_assets_assets": db_bank.liquid_assets_assets,
                 "npa_ratio": db_bank.npa_ratio,
+                "npl_ratio": db_bank.npl_ratio,
                 "llr_avg_loan": db_bank.llr_avg_loan,
                 "coverage_ratio": db_bank.coverage_ratio,
                 "oler": db_bank.oler,
@@ -419,7 +459,10 @@ async def upload_and_analyze(file: UploadFile = File(...), db: Session = Depends
                 "provision_expenses_assets": db_bank.provision_expenses_assets,
                 "non_op_assets": db_bank.non_op_assets,
                 "tax_expenses_assets": db_bank.tax_expenses_assets,
-                "assets_equity": db_bank.assets_equity
+                "assets_equity": db_bank.assets_equity,
+                "roaa": db_bank.roaa,
+                "roae": db_bank.roae,
+                "gross_loans_deposits": db_bank.gross_loans_deposits
             },
             "camels_rating": composite,
             "detailed_ratings": ratings,

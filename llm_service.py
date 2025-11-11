@@ -15,90 +15,186 @@ def extract_bank_data_from_file(file_path: str) -> dict:
     Extrait TOUTES les données financières CAMELS d'un fichier.
     """
     
-    # PROMPT AMÉLIORÉ - Extrait TOUS les champs
     prompt = """
-Tu es un expert en analyse financière bancaire. Extrais TOUTES les informations suivantes d'un état financier bancaire.
+Tu es un expert en analyse financière bancaire UEMOA/CEMAC. Extrais TOUTES les informations du bilan et compte de résultat.
 
 INSTRUCTIONS CRITIQUES:
-1. Extrais les valeurs dans leur unité d'origine (millions, milliards, etc.)
-2. Pour les pourcentages (ex: CAR 11.5%), extrais comme NOMBRE (11.5)
-3. Si une information est manquante, mets null
-4. Sois précis et exhaustif
+1. Lis le DOCUMENT ENTIER - Balance Sheet ET Income Statement
+2. Cherche les valeurs sous TOUS leurs noms possibles (voir ci-dessous)
+3. Extrais les CHIFFRES EXACTS dans leur unité (millions XOF, USD, etc.)
+4. Pour les pourcentages: extrais le NOMBRE (11.5% → 11.5)
+5. Si vraiment absent après recherche exhaustive: null
 
-INFORMATIONS À EXTRAIRE:
+═══════════════════════════════════════════════════════════════
 
-**IDENTIFIANTS:**
-- fiscal_year: Année fiscale exacte (ex: "2023", "FY23")
+BILAN - ACTIFS (cherche ces noms ET leurs variantes):
 
-**BILAN - ACTIFS (en millions):**
-- cash_reserves_requirements: Réserves en cash
-- due_from_banks: Dû par les banques
-- investment_securities: Titres d'investissement
-- gross_loans: Prêts bruts TOTAL
-- loan_loss_provisions: Provisions pour pertes
-- foreclosed_assets: Actifs saisis
-- investment_in_subs_affiliates: Investissements dans filiales
-- other_assets: Autres actifs
-- fixed_assets: Immobilisations
-- total_assets: TOTAL ACTIFS (OBLIGATOIRE)
+cash_reserves_requirements:
+→ "Cash & Reserve Requirements" / "Caisse et Banque Centrale" / "Disponibilités et réserves"
 
-**BILAN - PASSIFS (en millions):**
-- deposits: Dépôts clients
-- interbank_liabilities: Dettes interbancaires
-- other_liabilities: Autres passifs
-- total_liabilities: TOTAL PASSIFS
+due_from_banks:
+→ "Due from Banks" / "Correspondants bancaires" / "Comptes à vue auprès des établissements de crédit"
 
-**BILAN - CAPITAUX PROPRES (en millions):**
-- paid_in_capital: Capital libéré
-- reserves: Réserves
-- retained_earnings: Bénéfices non distribués
-- net_profit: Bénéfice net de l'exercice
-- total_equity: TOTAL CAPITAUX PROPRES
+investment_securities:
+→ "Investment Securities" / "Titres de placement" / "Portefeuille-titres" / "Valeurs mobilières"
 
-**COMPTE DE RÉSULTAT (en millions):**
-- interest_income: Produits d'intérêts
-- interest_expenses: Charges d'intérêts
-- net_interest_income: Marge nette d'intérêt
-- non_interest_income_commissions: Commissions
-- net_income_investment: Revenus des investissements
-- other_net_income: Autres revenus nets
-- operating_expenses: Frais d'exploitation
-- operating_profit: Résultat d'exploitation
-- provision_expenses: Dotations aux provisions
-- non_operating_profit_loss: Résultat non opérationnel
-- income_tax: Impôts
-- net_income: RÉSULTAT NET (OBLIGATOIRE)
+gross_loans:
+→ "Gross Loans" / "Crédits à la clientèle" / "Encours de crédit" / "Prêts bruts"
 
-**RATIOS CAMELS - CAPITAL:**
-- car_regulatory: CAR réglementaire (NOMBRE, ex: 11.5)
-- car_bank_reported: CAR reporté par la banque (NOMBRE)
+loan_loss_provisions:
+→ "Loan Loss Provisions" / "Provisions pour créances douteuses" / "Dépréciation des créances" (VALEUR NÉGATIVE)
 
-**QUALITÉ DES ACTIFS (en millions):**
-- problem_assets_mn: Actifs problématiques totaux
-- npls_mn: Prêts non performants (NPL)
-- llr_mn: Réserves pour pertes (LLR)
+foreclosed_assets:
+→ "Foreclosed Assets" / "Immobilisations saisies" / "Actifs repris"
 
-**AUTRES:**
-- fx_rate_period_end: Taux de change fin de période (si applicable)
-- fx_rate_period_avg: Taux de change moyen (si applicable)
+other_assets:
+→ "Other Assets" / "Autres actifs" / "Actifs divers"
 
-Réponds UNIQUEMENT en JSON avec ce format exact:
+fixed_assets:
+→ "Fixed Assets" / "Immobilisations" / "Actifs immobilisés" / "Immobilisations corporelles"
+
+total_assets:
+→ "Total Assets" / "Total Actif" / "TOTAL BILAN ACTIF" (OBLIGATOIRE)
+
+═══════════════════════════════════════════════════════════════
+
+BILAN - PASSIFS:
+
+deposits:
+→ "Deposits" / "Dépôts de la clientèle" / "Comptes créditeurs de la clientèle"
+
+interbank_liabilities:
+→ "Interbank Liabilities" / "Dettes envers les établissements de crédit"
+
+other_liabilities:
+→ "Other Liabilities" / "Autres passifs" / "Dettes diverses"
+
+total_liabilities:
+→ "Total Liabilities" / "Total Passif" / "TOTAL DETTES"
+
+═══════════════════════════════════════════════════════════════
+
+BILAN - CAPITAUX PROPRES:
+
+paid_in_capital:
+→ "Paid in Capital" / "Capital social" / "Capital"
+
+reserves:
+→ "Reserves" / "Réserves" / "Réserves légales et statutaires"
+
+retained_earnings:
+→ "Retained Earnings" / "Report à nouveau" / "Bénéfices reportés"
+
+net_profit:
+→ "Net Profit" / "Résultat net de l'exercice" / "Bénéfice net"
+
+total_equity:
+→ "Total Equity" / "Capitaux propres" / "Total fonds propres" (OBLIGATOIRE)
+
+═══════════════════════════════════════════════════════════════
+
+COMPTE DE RÉSULTAT:
+
+interest_income:
+→ "Interest Income" / "Produits d'intérêts" / "Intérêts et produits assimilés"
+
+interest_expenses:
+→ "Interest Expenses" / "Charges d'intérêts" / "Intérêts et charges assimilées" (VALEUR POSITIVE, on inversera)
+
+net_interest_income:
+→ "Net Interest Income" / "Marge nette d'intérêt" / "Produit net bancaire d'intérêt"
+
+non_interest_income_commissions:
+→ "Non-Interest Income" / "Commissions" / "Produits de commissions" / "Commissions reçues"
+
+net_income_investment:
+→ "Net Income from Investment" / "Gains sur titres" / "Produits du portefeuille-titres"
+
+other_net_income:
+→ "Other Net Income" / "Autres produits nets" / "Produits divers"
+
+operating_expenses:
+→ "Operating Expenses" / "Frais généraux" / "Charges d'exploitation" / "Frais de personnel + autres frais"
+
+operating_profit:
+→ "Operating Profit" / "Résultat d'exploitation" / "Résultat brut d'exploitation"
+
+provision_expenses:
+→ "Provision Expenses" / "Dotations aux provisions" / "Coût du risque"
+
+non_operating_profit_loss:
+→ "Non-Operating Profit/Loss" / "Résultat exceptionnel" / "Éléments non récurrents"
+
+income_tax:
+→ "Income Tax" / "Impôts sur les bénéfices" / "Charge d'impôt"
+
+net_income:
+→ "Net Income" / "Résultat net" / "Bénéfice net de l'exercice" (OBLIGATOIRE)
+
+═══════════════════════════════════════════════════════════════
+
+RATIOS CAMELS:
+
+car_regulatory:
+→ "CAR" / "Ratio de solvabilité" / "Ratio Cooke" / "Ratio McDonough" (NOMBRE seulement: 11.5)
+
+car_bank_reported:
+→ "CAR banque" / "Solvabilité déclarée" (NOMBRE seulement: 14.6)
+
+═══════════════════════════════════════════════════════════════
+
+QUALITÉ DES ACTIFS:
+
+npls_mn:
+→ "NPLs" / "Créances en souffrance" / "Créances douteuses" / "Prêts non performants"
+
+═══════════════════════════════════════════════════════════════
+
+MÉTHODOLOGIE:
+1. Scanne TOUT le document ligne par ligne
+2. Pour chaque champ, cherche TOUTES ses variantes
+3. Si tu trouves le label mais pas le chiffre: regarde la colonne de droite
+4. Les chiffres peuvent être en format: "1,234.5" ou "1 234,5" ou "1234"
+5. Attention aux sous-totaux vs totaux
+
+FORMAT DE RÉPONSE (JSON UNIQUEMENT, AUCUN TEXTE):
 {
     "name": "Nom de la banque",
-    "country": "Pays",
-    "fiscal_year": "2023",
-    "total_assets": 1234567,
-    "cash_reserves_requirements": 123456,
-    "gross_loans": 987654,
-    "total_equity": 123456,
-    "net_income": 12345,
-    "car_regulatory": 11.5,
-    "car_bank_reported": 12.8,
-    "npls_mn": 8765,
-    ...
+    "fiscal_year": "2021",
+    "total_assets": 1316459,
+    "cash_reserves_requirements": 65797,
+    "due_from_banks": null,
+    "investment_securities": null,
+    "gross_loans": 889832,
+    "loan_loss_provisions": -25000,
+    "foreclosed_assets": null,
+    "other_assets": null,
+    "fixed_assets": null,
+    "total_liabilities": 1185660,
+    "deposits": 1099658,
+    "interbank_liabilities": null,
+    "other_liabilities": null,
+    "paid_in_capital": 10000,
+    "reserves": null,
+    "retained_earnings": 86768,
+    "net_profit": null,
+    "total_equity": 130799,
+    "interest_income": 74957,
+    "interest_expenses": 16362,
+    "net_interest_income": 58595,
+    "non_interest_income_commissions": null,
+    "net_income_investment": null,
+    "other_net_income": null,
+    "operating_expenses": 34490,
+    "operating_profit": 42042,
+    "provision_expenses": null,
+    "non_operating_profit_loss": null,
+    "income_tax": 6697,
+    "net_income": 34031,
+    "car_regulatory": null,
+    "car_bank_reported": null,
+    "npls_mn": null
 }
-
-Ne mets AUCUN texte avant ou après le JSON.
 """
     
     # Extraction selon le type de fichier
@@ -108,13 +204,14 @@ Ne mets AUCUN texte avant ou après le JSON.
         for page in reader.pages:
             text += page.extract_text()
         
+        # AUGMENTÉ: Envoie TOUT le texte, pas seulement 15000 chars
         message = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=2048,  # Augmenté pour plus de données
+            max_tokens=4096,  # Augmenté pour plus de données
             messages=[
                 {
                     "role": "user",
-                    "content": f"{prompt}\n\nVoici le contenu du document:\n\n{text[:15000]}"
+                    "content": f"{prompt}\n\nVoici le contenu COMPLET du document:\n\n{text[:50000]}"
                 }
             ]
         )
@@ -134,7 +231,7 @@ Ne mets AUCUN texte avant ou après le JSON.
         
         message = client.messages.create(
             model="claude-3-5-haiku-20241022",
-            max_tokens=2048,
+            max_tokens=4096,
             messages=[
                 {
                     "role": "user",
