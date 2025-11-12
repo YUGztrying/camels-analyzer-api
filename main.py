@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, UploadFile, File
+from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from database import get_db
@@ -9,7 +9,11 @@ from datetime import datetime
 from llm_service import extract_bank_data_from_file
 from camels_calculator import calculate_all_ratios, rate_capital, rate_asset_quality, rate_earnings, rate_liquidity, get_composite_rating
 from fastapi.middleware.cors import CORSMiddleware
+from job_manager import create_job, get_job, process_job_async
+import threading
+
 app = FastAPI()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # En prod, mets l'URL exacte du frontend
@@ -17,6 +21,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ===== DOSSIER UPLOADS =====
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ===== MODÈLES PYDANTIC =====
 
@@ -79,11 +87,11 @@ def get_bank(bank_id: int, db: Session = Depends(get_db)):
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     """Upload un fichier simple"""
-    os.makedirs("uploads", exist_ok=True)
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"uploads/{unique_filename}"
+    file_path = f"{UPLOAD_FOLDER}/{unique_filename}"
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -101,10 +109,10 @@ async def upload_file(file: UploadFile = File(...)):
 @app.get("/files")
 def list_files():
     """Liste tous les fichiers uploadés"""
-    if not os.path.exists("uploads"):
+    if not os.path.exists(UPLOAD_FOLDER):
         return {"files": [], "total": 0}
     
-    files = os.listdir("uploads")
+    files = os.listdir(UPLOAD_FOLDER)
     return {"total": len(files), "files": files}
 
 
@@ -115,10 +123,10 @@ async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends
     Puis crée la banque automatiquement avec TOUS les champs !
     """
     # 1. Sauvegarder le fichier
-    os.makedirs("uploads", exist_ok=True)
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"uploads/{unique_filename}"
+    file_path = f"{UPLOAD_FOLDER}/{unique_filename}"
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -203,6 +211,8 @@ async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends
             "file": unique_filename,
             "error": str(e)
         }
+
+
 @app.get("/banks/{bank_id}/calculate")
 def calculate_ratios(bank_id: int, db: Session = Depends(get_db)):
     """
@@ -294,192 +304,65 @@ def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
     }
 
 
+# ===== ROUTES ASYNCHRONES (NOUVEAU) =====
+
 @app.post("/upload-and-analyze")
-async def upload_and_analyze(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_and_analyze(file: UploadFile = File(...)):
     """
-    🔥 ROUTE ULTIME : Upload + Extract + Calculate + Rate
+    NOUVELLE VERSION ASYNCHRONE
     
-    Fait TOUT en un seul appel :
-    1. Upload le fichier
-    2. Extrait les données avec Claude
-    3. Calcule tous les ratios
-    4. Génère le rating CAMELS
-    5. Sauvegarde tout en DB
+    Upload un fichier et lance l'analyse en arrière-plan.
+    Retourne immédiatement un job_id pour suivre la progression.
+    
+    Utilise ensuite GET /job/{job_id} pour vérifier le statut.
     """
-    # 1. Upload
-    os.makedirs("uploads", exist_ok=True)
+    # 1. Sauvegarder le fichier
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"uploads/{unique_filename}"
+    filename = f"{timestamp}_{file.filename}"
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
     
     with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        content = await file.read()
+        buffer.write(content)
     
-    try:
-        # 2. Extraction avec Claude
-        extracted_data = extract_bank_data_from_file(file_path)
-        
-        # 3. Créer la banque
-        db_bank = BankDB(
-            bank_name=extracted_data.get("name", "Inconnu"),
-            country=extracted_data.get("country", "Inconnu"),
-            fiscal_year=extracted_data.get("fiscal_year"),
-            currency=extracted_data.get("currency", "XOF"),
-            file_urls=file_path,
-            
-            # Tous les champs...
-            total_assets=extracted_data.get("total_assets", 0),
-            cash_reserves_requirements=extracted_data.get("cash_reserves_requirements"),
-            due_from_banks=extracted_data.get("due_from_banks"),
-            investment_securities=extracted_data.get("investment_securities"),
-            gross_loans=extracted_data.get("gross_loans"),
-            loan_loss_provisions=extracted_data.get("loan_loss_provisions"),
-            foreclosed_assets=extracted_data.get("foreclosed_assets"),
-            investment_in_subs_affiliates=extracted_data.get("investment_in_subs_affiliates"),
-            other_assets=extracted_data.get("other_assets"),
-            fixed_assets=extracted_data.get("fixed_assets"),
-            deposits=extracted_data.get("deposits"),
-            interbank_liabilities=extracted_data.get("interbank_liabilities"),
-            other_liabilities=extracted_data.get("other_liabilities"),
-            total_liabilities=extracted_data.get("total_liabilities"),
-            paid_in_capital=extracted_data.get("paid_in_capital"),
-            reserves=extracted_data.get("reserves"),
-            retained_earnings=extracted_data.get("retained_earnings"),
-            net_profit=extracted_data.get("net_profit"),
-            total_equity=extracted_data.get("total_equity"),
-            interest_income=extracted_data.get("interest_income"),
-            interest_expenses=extracted_data.get("interest_expenses"),
-            net_interest_income=extracted_data.get("net_interest_income"),
-            non_interest_income_commissions=extracted_data.get("non_interest_income_commissions"),
-            net_income_investment=extracted_data.get("net_income_investment"),
-            other_net_income=extracted_data.get("other_net_income"),
-            operating_expenses=extracted_data.get("operating_expenses"),
-            operating_profit=extracted_data.get("operating_profit"),
-            provision_expenses=extracted_data.get("provision_expenses"),
-            non_operating_profit_loss=extracted_data.get("non_operating_profit_loss"),
-            income_tax=extracted_data.get("income_tax"),
-            net_income=extracted_data.get("net_income"),
-            car_regulatory=extracted_data.get("car_regulatory"),
-            car_bank_reported=extracted_data.get("car_bank_reported"),
-            problem_assets_mn=extracted_data.get("problem_assets_mn"),
-            npls_mn=extracted_data.get("npls_mn"),
-            llr_mn=extracted_data.get("llr_mn"),
-            fx_rate_period_end=extracted_data.get("fx_rate_period_end"),
-            fx_rate_period_avg=extracted_data.get("fx_rate_period_avg")
-        )
-        
-        # 4. Calculer les ratios
-        db_bank = calculate_all_ratios(db_bank)
-        
-        # 5. Sauvegarder
-        db.add(db_bank)
-        db.commit()
-        db.refresh(db_bank)
-        
-        # 6. Générer le rating
-        ratings = {
-            "capital": rate_capital(db_bank),
-            "asset_quality": rate_asset_quality(db_bank),
-            "earnings": rate_earnings(db_bank),
-            "liquidity": rate_liquidity(db_bank)
-        }
-        composite = get_composite_rating(ratings["capital"], ratings["asset_quality"], ratings["earnings"], ratings["liquidity"])
-        
-        return {
-            "message": "🎉 ANALYSE COMPLÈTE TERMINÉE !",
-            "file": unique_filename,
-            "bank": {
-                "id": db_bank.id,
-                "name": db_bank.bank_name,
-                "country": db_bank.country,
-                "fiscal_year": db_bank.fiscal_year,
-                
-                # Balance Sheet - Raw Data
-                "cash_reserves_requirements": db_bank.cash_reserves_requirements,
-                "due_from_banks": db_bank.due_from_banks,
-                "investment_securities": db_bank.investment_securities,
-                "gross_loans": db_bank.gross_loans,
-                "loan_loss_provisions": db_bank.loan_loss_provisions,
-                "foreclosed_assets": db_bank.foreclosed_assets,
-                "fixed_assets": db_bank.fixed_assets,
-                "other_assets": db_bank.other_assets,
-                "total_assets": db_bank.total_assets,
-                
-                "deposits": db_bank.deposits,
-                "interbank_liabilities": db_bank.interbank_liabilities,
-                "other_liabilities": db_bank.other_liabilities,
-                "total_liabilities": db_bank.total_liabilities,
-                
-                "paid_capital": db_bank.paid_in_capital,  # ✅ Corrigé
-                "reserves": db_bank.reserves,
-                "retained_earnings": db_bank.retained_earnings,
-                "net_profit": db_bank.net_profit,
-                "total_equity": db_bank.total_equity,
-                
-                # Income Statement - Raw Data
-                "interest_income": db_bank.interest_income,
-                "interest_expenses": db_bank.interest_expenses,
-                "net_interest_income": db_bank.net_interest_income,
-                "non_net_interest_income_commissions": db_bank.non_interest_income_commissions,  # ✅ Corrigé
-                "net_income_from_investment": db_bank.net_income_investment,  # ✅ Corrigé
-                "other_net_income": db_bank.other_net_income,
-                "operating_expenses": db_bank.operating_expenses,
-                "operating_profit": db_bank.operating_profit,
-                "provision_expenses": db_bank.provision_expenses,
-                "non_operating_profit_loss": db_bank.non_operating_profit_loss,
-                "income_tax": db_bank.income_tax,
-                "net_income": db_bank.net_income,
-                
-                # Asset Quality Data
-                "npls_mn": db_bank.npls_mn,
-                "llr_mn": db_bank.llr_mn,
-                "problem_assets_mn": db_bank.problem_assets_mn,
-                
-                # Calculated Ratios
-                "car_regulatory": db_bank.car_regulatory,
-                "car_bank_reported": db_bank.car_bank_reported,
-                "equity_assets": db_bank.equity_assets,
-                "cash_reserves_assets": db_bank.cash_reserves_assets,
-                "liquid_assets_assets": db_bank.liquid_assets_assets,
-                "npa_ratio": db_bank.npa_ratio,
-                "npl_ratio": db_bank.npl_ratio,
-                "llr_avg_loan": db_bank.llr_avg_loan,
-                "coverage_ratio": db_bank.coverage_ratio,
-                "oler": db_bank.oler,
-                "net_interest_margin": db_bank.net_interest_margin,
-                "net_interest_spread": db_bank.net_interest_spread,
-                "non_interest_income_assets": db_bank.non_interest_income_assets,
-                "interest_earning_assets_yield": db_bank.interest_earning_assets_yield,
-                "cost_of_funds": db_bank.cost_of_funds,
-                "opex_assets": db_bank.opex_assets,
-                "cost_to_income": db_bank.cost_to_income,
-                "net_interest_income_assets": db_bank.net_interest_income_assets,
-                "non_interest_income_assets_dupont": db_bank.non_interest_income_assets_dupont,
-                "opex_assets_dupont": db_bank.opex_assets_dupont,
-                "provision_expenses_assets": db_bank.provision_expenses_assets,
-                "non_op_assets": db_bank.non_op_assets,
-                "tax_expenses_assets": db_bank.tax_expenses_assets,
-                "assets_equity": db_bank.assets_equity,
-                "roaa": db_bank.roaa,
-                "roae": db_bank.roae,
-                "gross_loans_deposits": db_bank.gross_loans_deposits
-            },
-            "camels_rating": composite,
-            "detailed_ratings": ratings,
-            "key_metrics": {
-                "total_assets": db_bank.total_assets,
-                "car": db_bank.car_regulatory,
-                "roae": db_bank.roae,
-                "roaa": db_bank.roaa,
-                "npl_ratio": db_bank.npl_ratio,
-                "loans_deposits": db_bank.gross_loans_deposits
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "message": "❌ Erreur lors de l'analyse",
-            "file": unique_filename,
-            "error": str(e)
-        }
+    # 2. Créer le job
+    job_id = create_job(file_path, filename)
     
+    # 3. Lancer le traitement en arrière-plan (thread séparé)
+    thread = threading.Thread(target=process_job_async, args=(job_id, file_path))
+    thread.daemon = True
+    thread.start()
+    
+    # 4. Retourner immédiatement
+    return {
+        "job_id": job_id,
+        "status": "processing",
+        "message": "Analyse lancée en arrière-plan. Utilisez GET /job/{job_id} pour suivre la progression."
+    }
+
+
+@app.get("/job/{job_id}")
+async def get_job_status(job_id: str):
+    """
+    Récupère le statut d'un job d'analyse.
+    
+    Status possibles:
+    - "processing": En cours
+    - "completed": Terminé avec succès (result contient les données)
+    - "failed": Échec (error contient le message d'erreur)
+    """
+    job = get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job introuvable")
+    
+    return {
+        "job_id": job["id"],
+        "status": job["status"],
+        "step": job.get("step"),
+        "result": job.get("result"),
+        "error": job.get("error"),
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at")
+    }
