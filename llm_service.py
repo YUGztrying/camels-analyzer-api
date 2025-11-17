@@ -45,23 +45,32 @@ BILAN - ACTIFS (cherche ces intitulés exacts ou similaires):
 - investment_securities → "Titres de placement" / "Portefeuille-titres" / "Investment Securities"
 - gross_loans → "Crédits à la clientèle" (BRUT, avant provisions) / "Loans to Customers" / "Gross Loans"
 - loan_loss_provisions → "Provisions pour créances douteuses" / "Loan Loss Provisions" (valeur NÉGATIVE si provision)
+- foreclosed_assets → "Actifs saisis" / "Foreclosed Assets"
 - fixed_assets → "Immobilisations" / "Fixed Assets" / "Property & Equipment"
+- other_assets → "Autres actifs"
 - total_assets → "TOTAL ACTIF" / "TOTAL ASSETS" (⚠️ OBLIGATOIRE)
+
+IMPORTANT POUR LES NPL:
+- npls_mn → Cherche "Créances en souffrance" / "NPL" / "Non-performing loans" - SI ABSENT, utilise la valeur absolue de loan_loss_provisions
+- llr_mn → Cherche "Provisions sur créances" / "LLR" / "Loan Loss Reserves" - SI ABSENT, utilise la valeur absolue de loan_loss_provisions
 
 ═══════════════════════════════════════════════════════════════════════════════
 BILAN - PASSIFS:
 ═══════════════════════════════════════════════════════════════════════════════
 
 - deposits → "Dépôts de la clientèle" / "Customer Deposits" / "Dépôts à vue + à terme"
+- interbank_liabilities → "Dettes envers les établissements de crédit"
+- other_liabilities → "Autres passifs"
 - total_liabilities → "TOTAL PASSIF" / "Total Liabilities"
 
 ═══════════════════════════════════════════════════════════════════════════════
 BILAN - CAPITAUX PROPRES (EQUITY):
 ═══════════════════════════════════════════════════════════════════════════════
 
-- paid_capital → "Capital social" / "Share Capital"
+- paid_in_capital → "Capital social" / "Share Capital"
 - reserves → "Réserves" / "Reserves"
 - retained_earnings → "Report à nouveau" / "Retained Earnings"
+- net_profit → "Résultat de l'exercice" / "Net Profit"
 - total_equity → "CAPITAUX PROPRES" / "Total Equity" / "Fonds propres" (⚠️ OBLIGATOIRE)
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -71,9 +80,14 @@ COMPTE DE RÉSULTAT (INCOME STATEMENT):
 - interest_income → "Produits d'intérêts" / "Interest Income"
 - interest_expenses → "Charges d'intérêts" / "Interest Expenses"
 - net_interest_income → "Produit net bancaire" / "Marge nette d'intérêt" / "Net Interest Income"
-- non_interest_income_commissions → "Commissions" / "Fee Income"
+- non_interest_income_commissions → "Commissions" / "Fee Income" / "Commissions reçues"
+- net_income_investment → "Produits des investissements"
+- other_net_income → "Autres produits nets"
 - operating_expenses → "Frais généraux" / "Operating Expenses" / "Charges de personnel + autres charges"
+- operating_profit → "Résultat d'exploitation"
 - provision_expenses → "Dotations aux provisions" / "Provision Expenses"
+- non_operating_profit_loss → "Résultat hors exploitation"
+- income_tax → "Impôts" / "Income Tax"
 - net_income → "RÉSULTAT NET" / "NET INCOME" / "Bénéfice net" (⚠️ OBLIGATOIRE)
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -81,40 +95,73 @@ RATIOS PRUDENTIELS:
 ═══════════════════════════════════════════════════════════════════════════════
 
 - car_regulatory → "Ratio de solvabilité" / "CAR" / "Capital Adequacy Ratio" (format: 13.42 pour 13.42%)
-- npl_ratio → "Taux de créances en souffrance" / "NPL Ratio" (format: 5.2 pour 5.2%)
+- car_bank_reported → "CAR déclaré par la banque"
+CHERCHE CES RATIOS DÉJÀ CALCULÉS DANS LE DOCUMENT (section "Ratios", "Indicateurs", "Principaux ratios de gestion"):
 
+**SOLVABILITÉ:**
+- car_regulatory → "Ratio de solvabilité" / "CAR" / "Capital Adequacy Ratio" (format: 13.42 pour 13.42%)
+- car_bank_reported → "CAR déclaré par la banque"
+
+**QUALITÉ DES ACTIFS:**
+- npl_ratio_reported → "Taux de créances en souffrance" / "NPL Ratio" / "Créances douteuses / Crédits bruts" (format: 5.2 pour 5.2%)
+- coverage_ratio_reported → "Taux de couverture" / "Coverage Ratio" / "Couverture des créances douteuses" (format: 95.5 pour 95.5%)
+
+**RENTABILITÉ:**
+- roe_reported → "ROE" / "Rentabilité économique" / "Return on Equity" (format: 28.51 pour 28.51%)
+- roa_reported → "ROA" / "Rentabilité des actifs" / "Return on Assets" (format: 2.59 pour 2.59%)
+- cost_income_reported → "Coefficient d'exploitation" / "Cost to Income" / "Ratio d'efficience" (format: 45.09 pour 45.09%)
 ═══════════════════════════════════════════════════════════════════════════════
 FORMAT DE SORTIE (JSON UNIQUEMENT):
 ═══════════════════════════════════════════════════════════════════════════════
 
 ⚠️ NE RETOURNE QUE LE JSON - PAS DE TEXTE AVANT OU APRÈS
 ⚠️ Utilise null pour les valeurs manquantes (pas de 0 ou de valeurs inventées)
+⚠️ TOUS les montants en VALEUR ABSOLUE sauf loan_loss_provisions (négatif)
 
 {
     "name": "Nom de la banque",
+    "country": "Sénégal",
     "fiscal_year": "2023" ou "2022-2023",
-    "total_assets": 1316459,
-    "cash_reserves_requirements": 45678,
-    "due_from_banks": 12345,
-    "investment_securities": 98765,
-    "gross_loans": 889832,
-    "loan_loss_provisions": -15000,
-    "fixed_assets": 23456,
-    "deposits": 950000,
-    "total_liabilities": 1185660,
-    "paid_capital": 50000,
-    "reserves": 45000,
-    "retained_earnings": 1768,
-    "total_equity": 130799,
-    "interest_income": 85000,
-    "interest_expenses": 25000,
-    "net_interest_income": 60000,
-    "non_interest_income_commissions": 15000,
-    "operating_expenses": 35000,
-    "provision_expenses": 8000,
-    "net_income": 34031,
-    "car_regulatory": 13.42,
-    "npl_ratio": 4.5
+    "currency": "XOF",
+    "total_assets": 700000,
+    "cash_reserves_requirements": 50000,
+    "due_from_banks": 20000,
+    "investment_securities": 100000,
+    "gross_loans": 500000,
+    "loan_loss_provisions": -25000,
+    "foreclosed_assets": null,
+    "fixed_assets": 30000,
+    "other_assets": 25000,
+    "deposits": 550000,
+    "interbank_liabilities": null,
+    "other_liabilities": 50000,
+    "total_liabilities": 600000,
+    "paid_in_capital": 60000,
+    "reserves": 30000,
+    "retained_earnings": 5000,
+    "net_profit": 5000,
+    "total_equity": 100000,
+    "interest_income": 60000,
+    "interest_expenses": 20000,
+    "net_interest_income": 40000,
+    "non_interest_income_commissions": 10000,
+    "net_income_investment": null,
+    "other_net_income": null,
+    "operating_expenses": 30000,
+    "operating_profit": null,
+    "provision_expenses": 10000,
+    "non_operating_profit_loss": null,
+    "income_tax": 5000,
+    "net_income": 5000,
+    "car_regulatory": 14.3,
+    "car_bank_reported": null,
+    "npls_mn": 25000,
+    "llr_mn": 25000
+    "npl_ratio_reported": 4.55,
+    "coverage_ratio_reported": 95.5,
+    "roe_reported": 28.51,
+    "roa_reported": 2.59,
+    "cost_income_reported": 45.09
 }
 """
     
@@ -281,13 +328,20 @@ FORMAT DE SORTIE (JSON UNIQUEMENT):
     
     try:
         extracted_data = json.loads(json_str)
+        
         print("✅ JSON parsé avec succès!")
         print(f"   - Banque: {extracted_data.get('name', 'N/A')}")
         print(f"   - Année: {extracted_data.get('fiscal_year', 'N/A')}")
         print(f"   - Total Assets: {extracted_data.get('total_assets', 'N/A')}")
         print(f"   - Total Equity: {extracted_data.get('total_equity', 'N/A')}")
         print(f"   - Net Income: {extracted_data.get('net_income', 'N/A')}")
-        print("")
+        
+        print("\n" + "=" * 80)
+        print("📋 JSON COMPLET:")
+        print("=" * 80)
+        print(json.dumps(extracted_data, indent=2))
+        print("=" * 80 + "\n")
+        
         return extracted_data
         
     except json.JSONDecodeError as e:

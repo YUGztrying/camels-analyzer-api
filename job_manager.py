@@ -93,7 +93,16 @@ def process_job_async(job_id: str, file_path: str):
             fx_rate_period_end=extracted_data.get("fx_rate_period_end"),
             fx_rate_period_avg=extracted_data.get("fx_rate_period_avg")
         )
-        
+        if extracted_data.get("npl_ratio_reported"):
+            bank.npl_ratio_reported = extracted_data.get("npl_ratio_reported") / 100
+        if extracted_data.get("coverage_ratio_reported"):
+            bank.coverage_ratio_reported = extracted_data.get("coverage_ratio_reported") / 100
+        if extracted_data.get("roe_reported"):
+            bank.roe_reported = extracted_data.get("roe_reported") / 100
+        if extracted_data.get("roa_reported"):
+            bank.roa_reported = extracted_data.get("roa_reported") / 100
+        if extracted_data.get("cost_income_reported"):
+            bank.cost_income_reported = extracted_data.get("cost_income_reported") / 100
         # Etape 3: Calculer ratios
         update_job(job_id, "processing", step="Calcul des ratios CAMELS...")
         bank = calculate_all_ratios(bank)
