@@ -16,34 +16,53 @@ function App() {
 
   const handleUpload = async () => {
     if (!file) {
-      setError('Veuillez sélectionner un fichier');
+      setError('Please select a file');
       return;
     }
 
     setLoading(true);
     setError(null);
     setResult(null);
-    setProgress('Upload en cours...');
+    setProgress('Uploading...');
 
     try {
       const data = await uploadAndAnalyze(file, (step) => {
         setProgress(step);
       });
-      
       setProgress('');
       setResult(data);
     } catch (err) {
-      setError('Erreur lors de l\'analyse : ' + err.message);
+      setError('Analysis error: ' + err.message);
       setProgress('');
     } finally {
       setLoading(false);
     }
   };
 
+  const fmtPct = (val) => {
+    if (val === null || val === undefined) return 'N/A';
+    return `${(val * 100).toFixed(2)}%`;
+  };
+
+  const fmtNum = (val) => {
+    if (val === null || val === undefined) return '-';
+    return val.toLocaleString();
+  };
+
+  const ratingColor = (rating) => {
+    const colors = { 1: '#2E7D32', 2: '#558B2F', 3: '#F57F17', 4: '#E65100', 5: '#C62828' };
+    return colors[rating] || '#757575';
+  };
+
+  const bank = result?.bank;
+  const ratings = result?.detailed_ratings;
+  const analysis = result?.analysis;
+  const km = result?.key_metrics;
+
   return (
     <div className="App">
-      <h1>🏦 CAMELS Analyzer</h1>
-      <p>Analyse automatique des états financiers bancaires</p>
+      <h1>CAMELS Analyzer</h1>
+      <p className="subtitle">Automated bank financial statement analysis</p>
 
       <div className="upload-section">
         <input
@@ -52,464 +71,309 @@ function App() {
           accept=".pdf,.png,.jpg,.jpeg"
         />
         <button onClick={handleUpload} disabled={loading || !file}>
-          {loading ? '⏳ Analyse en cours...' : '🚀 Analyser'}
+          {loading ? 'Analyzing...' : 'Analyze'}
         </button>
       </div>
 
       {loading && (
         <div className="loading-container">
           <div className="spinner"></div>
-          <p className="loading-text">{progress || 'Initialisation...'}</p>
+          <p className="loading-text">{progress || 'Initializing...'}</p>
         </div>
       )}
 
-      {error && (
-        <div className="error">
-          ❌ {error}
-        </div>
-      )}
+      {error && <div className="error">{error}</div>}
 
       {result && (
         <div className="result">
-          <h2>✅ Analyse terminée !</h2>
-          
+          {/* Bank header */}
           <div className="bank-info">
-            <h3>{result?.bank?.name || 'Banque inconnue'}</h3>
-            <p>{result?.bank?.country || ''} - {result?.bank?.fiscal_year || ''}</p>
+            <h3>{bank?.bank_name || 'Unknown Bank'}</h3>
+            <p>{bank?.country || ''} — Fiscal Year {bank?.fiscal_year || ''} — {bank?.currency || 'XOF'}</p>
           </div>
 
+          {/* Composite rating */}
           <div className="rating-box">
-            <h3>Rating CAMELS Composite : {result?.camels_rating?.composite_rating || 'N/A'}</h3>
+            <h3>Composite CAMELS Rating: {result?.camels_rating?.composite_rating || 'N/A'}</h3>
             <p className={`status status-${result?.camels_rating?.composite_rating || 'na'}`}>
-              {result?.camels_rating?.status || 'Non disponible'}
+              {result?.camels_rating?.status || 'Insufficient data'}
             </p>
+            {result?.camels_rating?.average && (
+              <p style={{ marginTop: '0.5rem', opacity: 0.9 }}>Average score: {result.camels_rating.average} ({result.camels_rating.components_used} components)</p>
+            )}
           </div>
 
-          {/* BALANCE SHEET */}
-          <div className="financial-statement">
-            <h4 className="statement-header">📋 Balance Sheet - {result?.bank?.fiscal_year}</h4>
-            <table className="statement-table">
-              <thead>
-                <tr>
-                  <th>XOF mn</th>
-                  <th>{result?.bank?.fiscal_year}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="section-title">
-                  <td colSpan="2"><strong>ASSETS</strong></td>
-                </tr>
-                <tr>
-                  <td>Cash & Reserve Requirements</td>
-                  <td>{result?.bank?.cash_reserves_requirements?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Due from Banks</td>
-                  <td>{result?.bank?.due_from_banks?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Investment Securities</td>
-                  <td>{result?.bank?.investment_securities?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Gross Loans</td>
-                  <td>{result?.bank?.gross_loans?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Loan Loss Reserves</td>
-                  <td>({result?.bank?.llr_mn?.toLocaleString() || '-'})</td>
-                </tr>
-                <tr>
-                  <td>Foreclosed Assets</td>
-                  <td>{result?.bank?.foreclosed_assets?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Fixed Assets</td>
-                  <td>{result?.bank?.fixed_assets?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Other Assets</td>
-                  <td>{result?.bank?.other_assets?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr className="total-row">
-                  <td><strong>Total Assets</strong></td>
-                  <td><strong>{result?.bank?.total_assets?.toLocaleString() || '-'}</strong></td>
-                </tr>
-                
-                <tr className="section-title">
-                  <td colSpan="2"><strong>LIABILITIES</strong></td>
-                </tr>
-                <tr>
-                  <td>Customer Deposits</td>
-                  <td>{result?.bank?.deposits?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Interbank Liabilities</td>
-                  <td>{result?.bank?.interbank_liabilities?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Other Liabilities</td>
-                  <td>{result?.bank?.other_liabilities?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr className="total-row">
-                  <td><strong>Total Liabilities</strong></td>
-                  <td><strong>{result?.bank?.total_liabilities?.toLocaleString() || '-'}</strong></td>
-                </tr>
-                
-                <tr className="section-title">
-                  <td colSpan="2"><strong>EQUITY</strong></td>
-                </tr>
-                <tr>
-                  <td>Paid-in Capital</td>
-                  <td>{result?.bank?.paid_capital?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Reserves</td>
-                  <td>{result?.bank?.reserves?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Retained Earnings</td>
-                  <td>{result?.bank?.retained_earnings?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Net Profit</td>
-                  <td>{result?.bank?.net_profit?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr className="total-row">
-                  <td><strong>Total Equity</strong></td>
-                  <td><strong>{result?.bank?.total_equity?.toLocaleString() || '-'}</strong></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          {/* Composite analysis */}
+          {analysis?.composite && (
+            <div className="analysis-box composite-analysis">
+              <p>{analysis.composite}</p>
+            </div>
+          )}
 
-          {/* INCOME STATEMENT */}
-          <div className="financial-statement">
-            <h4 className="statement-header">💰 Income Statement - {result?.bank?.fiscal_year}</h4>
-            <table className="statement-table">
-              <thead>
-                <tr>
-                  <th>XOF mn</th>
-                  <th>{result?.bank?.fiscal_year}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Interest Income</td>
-                  <td>{result?.bank?.interest_income?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Interest Expenses</td>
-                  <td>({result?.bank?.interest_expenses?.toLocaleString() || '-'})</td>
-                </tr>
-                <tr className="subtotal-row">
-                  <td><strong>Net Interest Income</strong></td>
-                  <td><strong>{result?.bank?.net_interest_income?.toLocaleString() || '-'}</strong></td>
-                </tr>
-                
-                <tr>
-                  <td>Non-Interest Income (Commissions)</td>
-                  <td>{result?.bank?.non_net_interest_income_commissions?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Net Income from Investment</td>
-                  <td>{result?.bank?.net_income_from_investment?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Other Net Income</td>
-                  <td>{result?.bank?.other_net_income?.toLocaleString() || '-'}</td>
-                </tr>
-                
-                <tr>
-                  <td>Operating Expenses</td>
-                  <td>({result?.bank?.operating_expenses?.toLocaleString() || '-'})</td>
-                </tr>
-                <tr className="subtotal-row">
-                  <td><strong>Operating Profit</strong></td>
-                  <td><strong>{result?.bank?.operating_profit?.toLocaleString() || '-'}</strong></td>
-                </tr>
-                
-                <tr>
-                  <td>Provision Expenses</td>
-                  <td>({result?.bank?.provision_expenses?.toLocaleString() || '-'})</td>
-                </tr>
-                <tr>
-                  <td>Non-Operating Profit (Loss)</td>
-                  <td>{result?.bank?.non_operating_profit_loss?.toLocaleString() || '-'}</td>
-                </tr>
-                <tr>
-                  <td>Income Tax</td>
-                  <td>({result?.bank?.income_tax?.toLocaleString() || '-'})</td>
-                </tr>
-                <tr className="total-row">
-                  <td><strong>Net Income</strong></td>
-                  <td><strong>{result?.bank?.net_income?.toLocaleString() || '-'}</strong></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* TABLEAU 1: CAPITAL ADEQUACY (SOLVENCY) */}
-          <div className="ratio-section">
-            <h4 className="section-header solvency">💰 Capital Adequacy (Solvency Ratios)</h4>
+          {/* ===== C — CAPITAL ADEQUACY ===== */}
+          <div className="camels-section">
+            <div className="camels-header capital-header">
+              <span className="camels-letter">C</span>
+              <div>
+                <h4>Capital Adequacy</h4>
+                <span className={`rating-badge rating-${ratings?.capital?.rating || 'na'}`}>
+                  {ratings?.capital?.rating || '?'} — {ratings?.capital?.status || 'N/A'}
+                </span>
+              </div>
+            </div>
             <table className="ratio-table">
               <thead>
-                <tr>
-                  <th>Ratio</th>
-                  <th>Valeur</th>
-                  <th>Rating</th>
-                </tr>
+                <tr><th>Ratio</th><th>Formula</th><th>Value</th></tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>CAR - Regulatory</td>
-                  <td>{result?.key_metrics?.car ? `${result.key_metrics.car}%` : 'N/A'}</td>
-                  <td className={`rating-badge rating-${result?.detailed_ratings?.capital?.rating || 'na'}`}>
-                    {result?.detailed_ratings?.capital?.status || 'N/A'}
-                  </td>
-                </tr>
-                <tr>
-                  <td>CAR - Bank Reported</td>
-                  <td>{result?.bank?.car_bank_reported ? `${result.bank.car_bank_reported}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
                 <tr>
                   <td>Equity / Assets</td>
-                  <td>{result?.bank?.equity_assets ? `${(result.bank.equity_assets * 100).toFixed(2)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td className="formula">Shareholders' Equity / Total Assets</td>
+                  <td className="value">{fmtPct(km?.equity_assets)}</td>
+                </tr>
+                <tr>
+                  <td>Debt / Assets</td>
+                  <td className="formula">(Short-Term Borrowings + Long-Term Debt) / Total Assets</td>
+                  <td className="value">{fmtPct(km?.debt_assets)}</td>
                 </tr>
               </tbody>
             </table>
+            {analysis?.capital && <div className="analysis-paragraph"><p>{analysis.capital}</p></div>}
           </div>
 
-          {/* TABLEAU 2: LIQUIDITY */}
-          <div className="ratio-section">
-            <h4 className="section-header liquidity">💧 Liquidity Ratios</h4>
+          {/* ===== A — ASSET QUALITY ===== */}
+          <div className="camels-section">
+            <div className="camels-header asset-header">
+              <span className="camels-letter">A</span>
+              <div>
+                <h4>Asset Quality</h4>
+                <span className={`rating-badge rating-${ratings?.asset_quality?.rating || 'na'}`}>
+                  {ratings?.asset_quality?.rating || '?'} — {ratings?.asset_quality?.status || 'N/A'}
+                </span>
+              </div>
+            </div>
             <table className="ratio-table">
               <thead>
-                <tr>
-                  <th>Ratio</th>
-                  <th>Valeur</th>
-                  <th>Rating</th>
-                </tr>
+                <tr><th>Ratio</th><th>Formula</th><th>Value</th></tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>Cash & Reserves / Assets</td>
-                  <td>{result?.bank?.cash_reserves_assets ? `${(result.bank.cash_reserves_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>Liquid Assets / Assets</td>
-                  <td>{result?.bank?.liquid_assets_assets ? `${(result.bank.liquid_assets_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>Gross Loans / Customer Deposits</td>
-                  <td>{result?.key_metrics?.loans_deposits ? `${(result.key_metrics.loans_deposits * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td className={`rating-badge rating-${result?.detailed_ratings?.liquidity?.rating || 'na'}`}>
-                    {result?.detailed_ratings?.liquidity?.status || 'N/A'}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-
-          {/* TABLEAU 3: ASSET QUALITY */}
-          <div className="ratio-section">
-            <h4 className="section-header asset-quality">🏦 Asset Quality</h4>
-            <table className="ratio-table">
-              <thead>
-                <tr>
-                  <th>Ratio</th>
-                  <th>Valeur</th>
-                  <th>Rating</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Problem Assets (XOF mn)</td>
-                  <td>{result?.bank?.problem_assets_mn?.toLocaleString() || 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>NPLs (XOF mn)</td>
-                  <td>{result?.bank?.npls_mn?.toLocaleString() || 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>LLR (XOF mn)</td>
-                  <td>{result?.bank?.llr_mn?.toLocaleString() || 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>NPA Ratio</td>
-                  <td>{result?.bank?.npa_ratio ? `${(result.bank.npa_ratio * 100).toFixed(2)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
                 <tr>
                   <td>NPL Ratio</td>
-                  <td>{result?.key_metrics?.npl_ratio ? `${(result.key_metrics.npl_ratio * 100).toFixed(2)}%` : '⚠️ Non trouvé'}</td>
-                  <td className={`rating-badge rating-${result?.detailed_ratings?.asset_quality?.rating || 'na'}`}>
-                    {result?.detailed_ratings?.asset_quality?.status || 'Données insuffisantes'}
-                  </td>
-                </tr>
-                <tr>
-                  <td>LLR / Average Loan</td>
-                  <td>{result?.bank?.llr_avg_loan ? `${(result.bank.llr_avg_loan * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td className="formula">NPLs (Stage 3) / Gross Loans</td>
+                  <td className="value">{fmtPct(km?.npl_ratio)}</td>
                 </tr>
                 <tr>
                   <td>Coverage Ratio</td>
-                  <td>{result?.bank?.coverage_ratio ? `${(result.bank.coverage_ratio * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td className="formula">Loan Loss Provisions (ECL) / NPLs</td>
+                  <td className="value">{fmtPct(km?.coverage_ratio)}</td>
                 </tr>
                 <tr>
-                  <td>OLER (% of Equity)</td>
-                  <td>{result?.bank?.oler ? `${(result.bank.oler * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Cost of Risk / Avg Assets</td>
+                  <td className="formula">ECL / Average Total Assets</td>
+                  <td className="value">{fmtPct(km?.cost_of_risk_avg_assets)}</td>
                 </tr>
               </tbody>
             </table>
+            {analysis?.asset_quality && <div className="analysis-paragraph"><p>{analysis.asset_quality}</p></div>}
           </div>
 
-          {/* TABLEAU 4: PROFITABILITY RATIOS */}
-          <div className="ratio-section">
-            <h4 className="section-header earnings">📈 Profitability Ratios - LCY</h4>
+          {/* ===== M — MANAGEMENT ===== */}
+          <div className="camels-section">
+            <div className="camels-header management-header">
+              <span className="camels-letter">M</span>
+              <div>
+                <h4>Management (Efficiency)</h4>
+                <span className={`rating-badge rating-${ratings?.management?.rating || 'na'}`}>
+                  {ratings?.management?.rating || '?'} — {ratings?.management?.status || 'N/A'}
+                </span>
+              </div>
+            </div>
             <table className="ratio-table">
               <thead>
-                <tr>
-                  <th>Ratio</th>
-                  <th>Valeur</th>
-                  <th>Rating</th>
-                </tr>
+                <tr><th>Ratio</th><th>Formula</th><th>Value</th></tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Net Interest Margin</td>
-                  <td>{result?.bank?.net_interest_margin ? `${(result.bank.net_interest_margin * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Cost-to-Income Ratio</td>
+                  <td className="formula">Operating Expenses / Operating Income</td>
+                  <td className="value">{fmtPct(km?.cost_to_income)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {analysis?.management && <div className="analysis-paragraph"><p>{analysis.management}</p></div>}
+          </div>
+
+          {/* ===== E — EARNINGS ===== */}
+          <div className="camels-section">
+            <div className="camels-header earnings-header">
+              <span className="camels-letter">E</span>
+              <div>
+                <h4>Earnings</h4>
+                <span className={`rating-badge rating-${ratings?.earnings?.rating || 'na'}`}>
+                  {ratings?.earnings?.rating || '?'} — {ratings?.earnings?.status || 'N/A'}
+                </span>
+              </div>
+            </div>
+            <table className="ratio-table">
+              <thead>
+                <tr><th>Ratio</th><th>Formula</th><th>Value</th></tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>ROAA</td>
+                  <td className="formula">Net Profit / Average Total Assets</td>
+                  <td className="value">{fmtPct(km?.roaa)}</td>
                 </tr>
                 <tr>
-                  <td>Net Interest Spread</td>
-                  <td>{result?.bank?.net_interest_spread ? `${(result.bank.net_interest_spread * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>ROAE</td>
+                  <td className="formula">Net Profit / Average Shareholders' Equity</td>
+                  <td className="value">{fmtPct(km?.roae)}</td>
+                </tr>
+                <tr>
+                  <td>Net Interest Income / Avg Assets</td>
+                  <td className="formula">(Interest Income + Interest Expenses) / Avg Total Assets</td>
+                  <td className="value">{fmtPct(bank?.net_interest_income_avg_assets)}</td>
                 </tr>
                 <tr>
                   <td>Non-Interest Income / Avg Assets</td>
-                  <td>{result?.bank?.non_interest_income_assets ? `${(result.bank.non_interest_income_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td className="formula">(Fees & Commissions + Net Sales + Dividends + ...) / Avg Total Assets</td>
+                  <td className="value">{fmtPct(bank?.non_interest_income_avg_assets)}</td>
                 </tr>
                 <tr>
-                  <td>Interest Earning Assets Yield</td>
-                  <td>{result?.bank?.interest_earning_assets_yield ? `${(result.bank.interest_earning_assets_yield * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Operating Expenses / Avg Assets</td>
+                  <td className="formula">(Wages + Other OpEx + Amortization + Depreciation) / Avg Total Assets</td>
+                  <td className="value">{fmtPct(bank?.opex_avg_assets)}</td>
                 </tr>
                 <tr>
-                  <td>Cost of Funds</td>
-                  <td>{result?.bank?.cost_of_funds ? `${(result.bank.cost_of_funds * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Tax Expenses / Avg Assets</td>
+                  <td className="formula">Tax Expenses / Avg Total Assets</td>
+                  <td className="value">{fmtPct(bank?.tax_expenses_avg_assets)}</td>
                 </tr>
                 <tr>
-                  <td>Opex / Avg Assets</td>
-                  <td>{result?.bank?.opex_assets ? `${(result.bank.opex_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>Cost to Income ratio</td>
-                  <td>{result?.bank?.cost_to_income ? `${(result.bank.cost_to_income * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Other Income / Avg Assets</td>
+                  <td className="formula">(Provisions Formed + Impairment + FX Exchange) / Avg Total Assets</td>
+                  <td className="value">{fmtPct(bank?.other_income_avg_assets)}</td>
                 </tr>
               </tbody>
             </table>
+            {analysis?.earnings && <div className="analysis-paragraph"><p>{analysis.earnings}</p></div>}
           </div>
 
-          {/* TABLEAU 5: DUPONT ANALYSIS */}
-          <div className="ratio-section">
-            <h4 className="section-header dupont">📊 Dupont Analysis - LCY</h4>
+          {/* ===== L — LIQUIDITY ===== */}
+          <div className="camels-section">
+            <div className="camels-header liquidity-header">
+              <span className="camels-letter">L</span>
+              <div>
+                <h4>Liquidity</h4>
+                <span className={`rating-badge rating-${ratings?.liquidity?.rating || 'na'}`}>
+                  {ratings?.liquidity?.rating || '?'} — {ratings?.liquidity?.status || 'N/A'}
+                </span>
+              </div>
+            </div>
             <table className="ratio-table">
               <thead>
-                <tr>
-                  <th>Ratio</th>
-                  <th>Valeur</th>
-                  <th>Rating</th>
-                </tr>
+                <tr><th>Ratio</th><th>Formula</th><th>Value</th></tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>(a) Net Interest Income / Avg Assets</td>
-                  <td>{result?.bank?.net_interest_income_assets ? `${(result.bank.net_interest_income_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
+                  <td>Liquid Assets / Total Assets</td>
+                  <td className="formula">(Cash & Deposits with Banks + Investment Securities) / Total Assets</td>
+                  <td className="value">{fmtPct(km?.liquid_assets_total_assets)}</td>
                 </tr>
-                <tr>
-                  <td>(b) Non Interest Income / Avg Assets</td>
-                  <td>{result?.bank?.non_interest_income_assets_dupont ? `${(result.bank.non_interest_income_assets_dupont * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>(c) OPEX / Avg Assets</td>
-                  <td>{result?.bank?.opex_assets_dupont ? `${(result.bank.opex_assets_dupont * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>(d) Provision Expenses / Avg Assets</td>
-                  <td>{result?.bank?.provision_expenses_assets ? `${(result.bank.provision_expenses_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>(e) Non Operating Profit (Loss) / Avg Assets</td>
-                  <td>{result?.bank?.non_op_assets ? `${(result.bank.non_op_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>(f) Tax Expenses / Avg Assets</td>
-                  <td>{result?.bank?.tax_expenses_assets ? `${(result.bank.tax_expenses_assets * 100).toFixed(1)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>(g) Avg Assets / Avg Equity</td>
-                  <td>{result?.bank?.assets_equity ? `${result.bank.assets_equity.toFixed(1)}` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>ROAA</td>
-                  <td>{result?.key_metrics?.roaa ? `${(result.key_metrics.roaa * 100).toFixed(2)}%` : 'N/A'}</td>
-                  <td>-</td>
-                </tr>
-                <tr>
-                  <td>ROAE (a+b+c+d+e+f) x g</td>
-                  <td>{result?.key_metrics?.roae ? `${(result.key_metrics.roae * 100).toFixed(2)}%` : 'N/A'}</td>
-                  <td className={`rating-badge rating-${result?.detailed_ratings?.earnings?.rating || 'na'}`}>
-                    {result?.detailed_ratings?.earnings?.status || 'N/A'}
-                  </td>
-                </tr>
+              </tbody>
+            </table>
+            {analysis?.liquidity && <div className="analysis-paragraph"><p>{analysis.liquidity}</p></div>}
+          </div>
+
+          {/* ===== FINANCIAL STATEMENTS ===== */}
+          <div className="financial-statement">
+            <h4 className="statement-header">Balance Sheet — {bank?.fiscal_year}</h4>
+            <table className="statement-table">
+              <thead>
+                <tr><th>{bank?.currency || 'XOF'} mn</th><th>{bank?.fiscal_year}</th></tr>
+              </thead>
+              <tbody>
+                <tr className="section-title"><td colSpan="2"><strong>ASSETS</strong></td></tr>
+                <tr><td>Cash & Reserve Requirements</td><td>{fmtNum(bank?.cash_reserves_requirements)}</td></tr>
+                <tr><td>Due from Banks</td><td>{fmtNum(bank?.due_from_banks)}</td></tr>
+                <tr><td>Investment Securities</td><td>{fmtNum(bank?.investment_securities)}</td></tr>
+                <tr><td>Gross Loans</td><td>{fmtNum(bank?.gross_loans)}</td></tr>
+                <tr><td>Loan Loss Provisions</td><td>{bank?.loan_loss_provisions != null ? `(${fmtNum(Math.abs(bank.loan_loss_provisions))})` : '-'}</td></tr>
+                <tr><td>Foreclosed Assets</td><td>{fmtNum(bank?.foreclosed_assets)}</td></tr>
+                <tr><td>Fixed Assets</td><td>{fmtNum(bank?.fixed_assets)}</td></tr>
+                <tr><td>Other Assets</td><td>{fmtNum(bank?.other_assets)}</td></tr>
+                <tr className="total-row"><td><strong>Total Assets</strong></td><td><strong>{fmtNum(bank?.total_assets)}</strong></td></tr>
+
+                <tr className="section-title"><td colSpan="2"><strong>LIABILITIES</strong></td></tr>
+                <tr><td>Customer Deposits</td><td>{fmtNum(bank?.deposits)}</td></tr>
+                <tr><td>Short-Term Borrowings</td><td>{fmtNum(bank?.short_term_borrowings)}</td></tr>
+                <tr><td>Long-Term Debt</td><td>{fmtNum(bank?.long_term_debt)}</td></tr>
+                <tr><td>Interbank Liabilities</td><td>{fmtNum(bank?.interbank_liabilities)}</td></tr>
+                <tr><td>Other Liabilities</td><td>{fmtNum(bank?.other_liabilities)}</td></tr>
+                <tr className="total-row"><td><strong>Total Liabilities</strong></td><td><strong>{fmtNum(bank?.total_liabilities)}</strong></td></tr>
+
+                <tr className="section-title"><td colSpan="2"><strong>EQUITY</strong></td></tr>
+                <tr><td>Paid-in Capital</td><td>{fmtNum(bank?.paid_in_capital)}</td></tr>
+                <tr><td>Reserves</td><td>{fmtNum(bank?.reserves)}</td></tr>
+                <tr><td>Retained Earnings</td><td>{fmtNum(bank?.retained_earnings)}</td></tr>
+                <tr><td>Net Profit</td><td>{fmtNum(bank?.net_profit)}</td></tr>
+                <tr className="total-row"><td><strong>Total Equity</strong></td><td><strong>{fmtNum(bank?.total_equity)}</strong></td></tr>
               </tbody>
             </table>
           </div>
 
-          {/* RÉSUMÉ DES MÉTRIQUES */}
+          <div className="financial-statement">
+            <h4 className="statement-header">Income Statement — {bank?.fiscal_year}</h4>
+            <table className="statement-table">
+              <thead>
+                <tr><th>{bank?.currency || 'XOF'} mn</th><th>{bank?.fiscal_year}</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>Interest Income</td><td>{fmtNum(bank?.interest_income)}</td></tr>
+                <tr><td>Interest Expenses</td><td>{bank?.interest_expenses != null ? `(${fmtNum(bank.interest_expenses)})` : '-'}</td></tr>
+                <tr className="subtotal-row"><td><strong>Net Interest Income</strong></td><td><strong>{fmtNum(bank?.net_interest_income)}</strong></td></tr>
+
+                <tr><td>Fees & Commissions</td><td>{fmtNum(bank?.fees_commissions || bank?.non_interest_income_commissions)}</td></tr>
+                <tr><td>Other Revenues</td><td>{fmtNum(bank?.other_revenues || bank?.other_net_income)}</td></tr>
+                {bank?.operating_income && <tr className="subtotal-row"><td><strong>Operating Income</strong></td><td><strong>{fmtNum(bank.operating_income)}</strong></td></tr>}
+
+                <tr><td>Operating Expenses</td><td>{bank?.operating_expenses != null ? `(${fmtNum(bank.operating_expenses)})` : '-'}</td></tr>
+                {bank?.operating_profit && <tr className="subtotal-row"><td><strong>Operating Profit</strong></td><td><strong>{fmtNum(bank.operating_profit)}</strong></td></tr>}
+
+                <tr><td>Provision Expenses (ECL)</td><td>{bank?.provision_expenses != null ? `(${fmtNum(bank.provision_expenses)})` : '-'}</td></tr>
+                <tr><td>Income Tax</td><td>{bank?.income_tax != null ? `(${fmtNum(bank.income_tax)})` : '-'}</td></tr>
+                <tr className="total-row"><td><strong>Net Income</strong></td><td><strong>{fmtNum(bank?.net_income)}</strong></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* Key metrics cards */}
           <div className="metrics-summary">
-            <h4>📊 Métriques Clés</h4>
+            <h4>Key Metrics</h4>
             <div className="metrics-grid">
               <div className="metric-card">
-                <span className="metric-label">Total Actifs</span>
-                <span className="metric-value">{result?.key_metrics?.total_assets?.toLocaleString() || 'N/A'} M</span>
+                <span className="metric-label">Total Assets</span>
+                <span className="metric-value">{km?.total_assets?.toLocaleString() || 'N/A'}</span>
               </div>
               <div className="metric-card">
-                <span className="metric-label">CAR</span>
-                <span className="metric-value">{result?.key_metrics?.car || 'N/A'}%</span>
+                <span className="metric-label">Equity / Assets</span>
+                <span className="metric-value">{fmtPct(km?.equity_assets)}</span>
               </div>
               <div className="metric-card">
-                <span className="metric-label">ROE</span>
-                <span className="metric-value">
-                  {result?.key_metrics?.roae ? `${(result.key_metrics.roae * 100).toFixed(2)}%` : 'N/A'}
-                </span>
+                <span className="metric-label">ROAE</span>
+                <span className="metric-value">{fmtPct(km?.roae)}</span>
               </div>
               <div className="metric-card">
-                <span className="metric-label">ROA</span>
-                <span className="metric-value">
-                  {result?.key_metrics?.roaa ? `${(result.key_metrics.roaa * 100).toFixed(2)}%` : 'N/A'}
-                </span>
+                <span className="metric-label">ROAA</span>
+                <span className="metric-value">{fmtPct(km?.roaa)}</span>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">NPL Ratio</span>
+                <span className="metric-value">{fmtPct(km?.npl_ratio)}</span>
+              </div>
+              <div className="metric-card">
+                <span className="metric-label">Cost-to-Income</span>
+                <span className="metric-value">{fmtPct(km?.cost_to_income)}</span>
               </div>
             </div>
           </div>
