@@ -1,21 +1,27 @@
+import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
+from dotenv import load_dotenv
 
-# URL de connexion (avec le port 5433 !)
-DATABASE_URL = "postgresql://camels_user:password123@localhost:5433/camels_db"
+load_dotenv()
 
-# Moteur de base de données
-engine = create_engine(DATABASE_URL)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL environment variable is required. Set it in .env")
 
-# Session factory
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=1800,
+)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base pour les modèles
 Base = declarative_base()
 
 
-# Fonction pour obtenir une session DB
 def get_db():
     db = SessionLocal()
     try:

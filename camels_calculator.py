@@ -51,7 +51,9 @@ def _safe_divide(numerator, denominator):
 def _calculate_average(current, previous=None):
     """Average of current and previous period value; falls back to current."""
     if previous is not None and previous != 0:
-        return (current + previous) / 2 if current else previous / 2
+        if current:
+            return (current + previous) / 2
+        return previous
     return current if current else 0
 
 
@@ -148,10 +150,15 @@ def calculate_all_ratios(bank, prev_bank=None):
     bank.roaa = _safe_divide(net_profit, avg_assets)
     bank.roae = _safe_divide(net_profit, avg_equity)
 
-    # Net Interest Income / Avg Assets = (Interest Income + Interest Expenses) / Avg Assets
-    ii = _get(bank, 'interest_income')
-    ie = _get(bank, 'interest_expenses')
-    bank.net_interest_income_avg_assets = _safe_divide(ii + ie, avg_assets) if (ii or ie) else None
+    # Net Interest Income / Avg Assets
+    # Note: interest_expenses is extracted as a positive number, so we subtract
+    # to get net interest income. Falls back to net_interest_income if available.
+    nii_val = _get(bank, 'net_interest_income')
+    if not nii_val:
+        ii = _get(bank, 'interest_income')
+        ie = _get(bank, 'interest_expenses')
+        nii_val = ii - ie if (ii or ie) else 0
+    bank.net_interest_income_avg_assets = _safe_divide(nii_val, avg_assets) if nii_val else None
 
     # Non-Interest Income / Avg Assets (granular)
     non_ii_total = sum([
@@ -205,7 +212,8 @@ def calculate_all_ratios(bank, prev_bank=None):
 
     yield_on_assets = _safe_divide(_get(bank, 'interest_income'), _get(bank, 'total_assets'))
     cost_of_liabs = _safe_divide(_get(bank, 'interest_expenses'), _get(bank, 'total_liabilities'))
-    bank.net_interest_spread = ((yield_on_assets or 0) - (cost_of_liabs or 0)) or None
+    spread = (yield_on_assets or 0) - (cost_of_liabs or 0)
+    bank.net_interest_spread = spread if (yield_on_assets is not None or cost_of_liabs is not None) else None
     bank.interest_earning_assets_yield = _safe_divide(
         _get(bank, 'interest_income'),
         _get(bank, 'gross_loans') + _get(bank, 'investment_securities'))

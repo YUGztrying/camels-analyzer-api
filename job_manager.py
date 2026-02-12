@@ -1,37 +1,107 @@
 import uuid
-import threading
+import json
+import logging
+import traceback
 from datetime import datetime
-from typing import Dict, Optional
 
-jobs: Dict[str, dict] = {}
+from sqlalchemy import Column, String, Text, DateTime
+from sqlalchemy.sql import func
+from database import Base, SessionLocal
+
+logger = logging.getLogger(__name__)
+
+
+# ===== Job DB Model =====
+
+class JobDB(Base):
+    __tablename__ = "jobs"
+
+    id = Column(String, primary_key=True, index=True)
+    status = Column(String, nullable=False, default="processing")
+    step = Column(String)
+    file_path = Column(String)
+    filename = Column(String)
+    result_json = Column(Text)
+    error = Column(Text)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+# ===== Public API =====
 
 def create_job(file_path: str, filename: str) -> str:
     job_id = str(uuid.uuid4())
-    jobs[job_id] = {
-        "id": job_id,
-        "status": "processing",
-        "step": "Initialisation...",
-        "file_path": file_path,
-        "filename": filename,
-        "created_at": datetime.now().isoformat(),
-        "result": None,
-        "error": None
-    }
+    db = SessionLocal()
+    try:
+        job = JobDB(
+            id=job_id,
+            status="processing",
+            step="Initializing...",
+            file_path=file_path,
+            filename=filename,
+        )
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
     return job_id
 
-def get_job(job_id: str) -> Optional[dict]:
-    return jobs.get(job_id)
+
+def get_job(job_id: str) -> dict | None:
+    db = SessionLocal()
+    try:
+        job = db.query(JobDB).filter(JobDB.id == job_id).first()
+        if not job:
+            return None
+
+        result = None
+        if job.result_json:
+            try:
+                result = json.loads(job.result_json)
+            except json.JSONDecodeError:
+                result = None
+
+        return {
+            "id": job.id,
+            "status": job.status,
+            "step": job.step,
+            "result": result,
+            "error": job.error,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        }
+    finally:
+        db.close()
+
 
 def update_job(job_id: str, status: str, step: str = None, result=None, error=None):
-    if job_id in jobs:
-        jobs[job_id]["status"] = status
+    db = SessionLocal()
+    try:
+        job = db.query(JobDB).filter(JobDB.id == job_id).first()
+        if not job:
+            return
+        job.status = status
         if step:
-            jobs[job_id]["step"] = step
-        if result:
-            jobs[job_id]["result"] = result
+            job.step = step
+        if result is not None:
+            job.result_json = _serialize_result(result)
         if error:
-            jobs[job_id]["error"] = error
-        jobs[job_id]["updated_at"] = datetime.now().isoformat()
+            job.error = error
+        db.commit()
+    finally:
+        db.close()
+
+
+def _serialize_result(result: dict) -> str:
+    """Serialize result dict to JSON, handling datetime and other types."""
+    def default_serializer(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return str(obj)
+    return json.dumps(result, default=default_serializer)
+
+
+# ===== Background processing =====
 
 def process_job_async(job_id: str, file_path: str):
     from llm_service import extract_bank_data_from_file
@@ -41,20 +111,14 @@ def process_job_async(job_id: str, file_path: str):
         get_composite_rating, generate_analysis_paragraphs
     )
     from models import BankDB
-    from database import SessionLocal
 
-    # All fields to extract from Claude's response and map to BankDB
     FIELD_MAP = [
-        # Balance sheet - Assets
         "cash_reserves_requirements", "due_from_banks", "investment_securities",
         "gross_loans", "loan_loss_provisions", "foreclosed_assets",
         "investment_in_subs_affiliates", "other_assets", "fixed_assets",
-        # Balance sheet - Liabilities
         "deposits", "short_term_borrowings", "long_term_debt",
         "interbank_liabilities", "other_liabilities", "total_liabilities",
-        # Equity
         "paid_in_capital", "reserves", "retained_earnings", "net_profit", "total_equity",
-        # Income statement
         "interest_income", "interest_expenses", "net_interest_income",
         "fees_commissions", "net_sales", "dividends", "fvtpl_changes",
         "securitization_gains", "provisions_no_longer_required",
@@ -64,9 +128,7 @@ def process_job_async(job_id: str, file_path: str):
         "operating_expenses", "operating_income", "operating_profit",
         "provision_expenses", "provisions_formed", "impairment_financial_assets", "fx_exchange",
         "non_operating_profit_loss", "income_tax", "net_income",
-        # Raw ratios from document
         "car_regulatory", "car_bank_reported", "npls_mn", "llr_mn",
-        # FX
         "fx_rate_period_end", "fx_rate_period_avg",
     ]
 
@@ -151,9 +213,9 @@ def process_job_async(job_id: str, file_path: str):
         }
 
         update_job(job_id, "completed", step="Done!", result=result)
+        logger.info(f"Job {job_id} completed successfully for {bank.bank_name}")
 
     except Exception as e:
-        print(f"JOB ERROR {job_id}: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Job {job_id} failed: {str(e)}")
+        logger.error(traceback.format_exc())
         update_job(job_id, "failed", step="Failed", error=str(e))

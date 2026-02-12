@@ -1,45 +1,97 @@
+import os
+import logging
+import threading
+from datetime import datetime
+
+# Configure logging before other imports
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from database import get_db
 from models import BankDB
-import os
-import shutil
-from datetime import datetime
-from llm_service import extract_bank_data_from_file
 from camels_calculator import (
     calculate_all_ratios, rate_capital, rate_asset_quality,
     rate_management, rate_earnings, rate_liquidity,
     get_composite_rating, generate_analysis_paragraphs
 )
-from fastapi.middleware.cors import CORSMiddleware
 from job_manager import create_job, get_job, process_job_async
-import threading
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
+
+# ===== Config =====
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
+MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ===== App =====
+app = FastAPI(title="CAMELS Analyzer API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=[o.strip() for o in CORS_ORIGINS],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ===== Helpers =====
+
+def _validate_upload(file: UploadFile) -> None:
+    """Validate file extension and size."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+
+async def _save_upload(file: UploadFile) -> tuple[str, str]:
+    """Save upload to disk, enforce size limit. Returns (file_path, filename)."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    filename = f"{timestamp}_{safe_name}"
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+
+    content = await file.read()
+    size_mb = len(content) / (1024 * 1024)
+    if size_mb > MAX_UPLOAD_SIZE_MB:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large ({size_mb:.1f} MB). Maximum is {MAX_UPLOAD_SIZE_MB} MB"
+        )
+
+    with open(file_path, "wb") as buffer:
+        buffer.write(content)
+
+    return file_path, filename
 
 
 # ===== Pydantic models =====
 
-class Bank(BaseModel):
+class BankCreate(BaseModel):
     name: str
     country: str
     total_assets: float
     currency: str = "XOF"
 
 
-class BankResponse(Bank):
+class BankResponse(BankCreate):
     id: int
 
     class Config:
@@ -50,11 +102,16 @@ class BankResponse(Bank):
 
 @app.get("/")
 def home():
-    return {"message": "CAMELS Analyzer API"}
+    return {"message": "CAMELS Analyzer API", "version": "2.0.0"}
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
 @app.post("/banks", response_model=BankResponse)
-def create_bank(bank: Bank, db: Session = Depends(get_db)):
+def create_bank(bank: BankCreate, db: Session = Depends(get_db)):
     db_bank = BankDB(
         bank_name=bank.name,
         country=bank.country,
@@ -85,18 +142,13 @@ def get_bank(bank_id: int, db: Session = Depends(get_db)):
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"{UPLOAD_FOLDER}/{unique_filename}"
-
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-
+    _validate_upload(file)
+    file_path, filename = await _save_upload(file)
     return {
         "message": "File uploaded",
         "filename": file.filename,
-        "saved_as": unique_filename,
-        "file_url": f"/uploads/{unique_filename}"
+        "saved_as": filename,
+        "file_url": f"/uploads/{filename}"
     }
 
 
@@ -182,14 +234,8 @@ def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
 
 @app.post("/upload-and-analyze")
 async def upload_and_analyze(file: UploadFile = File(...)):
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}_{file.filename}"
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
+    _validate_upload(file)
+    file_path, filename = await _save_upload(file)
 
     job_id = create_job(file_path, filename)
 

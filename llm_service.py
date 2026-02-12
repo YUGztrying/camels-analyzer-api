@@ -1,11 +1,18 @@
 import anthropic
 import os
+import logging
 from dotenv import load_dotenv
 import json
 from PyPDF2 import PdfReader
 
 load_dotenv()
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+logger = logging.getLogger(__name__)
+
+_api_key = os.getenv("ANTHROPIC_API_KEY")
+if not _api_key:
+    logger.warning("ANTHROPIC_API_KEY not set — document extraction will fail")
+
+client = anthropic.Anthropic(api_key=_api_key)
 
 def extract_bank_data_from_file(file_path: str) -> dict:
     """
@@ -188,7 +195,7 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
     # --- Process by file type ---
 
     if file_path.lower().endswith('.pdf'):
-        print("Processing PDF file...")
+        logger.info("Processing PDF file...")
 
         reader = PdfReader(file_path)
         text = ""
@@ -197,7 +204,7 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
 
         if len(text.strip()) < 100:
             # Scanned PDF -> OCR all pages
-            print("Scanned PDF detected - running OCR on all pages...")
+            logger.info("Scanned PDF detected - running OCR on all pages...")
             from pdf2image import convert_from_path
             import pytesseract
 
@@ -205,19 +212,19 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
             if not images:
                 raise Exception("Failed to convert PDF to images")
 
-            print(f"{len(images)} page(s) converted")
+            logger.info(f"{len(images)} page(s) converted")
 
             full_text = ""
             for i, img in enumerate(images):
-                print(f"  OCR page {i+1}/{len(images)}...", end=" ")
+                logger.info(f"  OCR page {i+1}/{len(images)}...")
                 try:
                     page_text = pytesseract.image_to_string(img, lang='fra+eng', config='--psm 6')
                     full_text += f"\n\n{'='*80}\nPAGE {i+1}\n{'='*80}\n\n{page_text}"
-                    print(f"OK ({len(page_text)} chars)")
+                    logger.debug(f"OCR page {i+1} OK ({len(page_text)} chars)")
                 except Exception as e:
-                    print(f"OCR error: {e}")
+                    logger.error(f"OCR error on page {i+1}: {e}")
 
-            print(f"OCR complete: {len(full_text)} total characters")
+            logger.info(f"OCR complete: {len(full_text)} total characters")
 
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
@@ -229,7 +236,7 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
             )
         else:
             # Text-based PDF
-            print(f"Text PDF ({len(text)} characters)")
+            logger.info(f"Text PDF ({len(text)} characters)")
 
             message = client.messages.create(
                 model="claude-3-5-haiku-20241022",
@@ -241,13 +248,13 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
             )
     else:
         # Direct image (JPG/PNG)
-        print(f"Image file: {file_path}")
+        logger.info(f"Image file: {file_path}")
         from PIL import Image
         import pytesseract
 
         img = Image.open(file_path)
         image_text = pytesseract.image_to_string(img, lang='fra+eng', config='--psm 6')
-        print(f"OCR extracted: {len(image_text)} characters")
+        logger.info(f"OCR extracted: {len(image_text)} characters")
 
         message = client.messages.create(
             model="claude-3-5-haiku-20241022",
@@ -275,7 +282,7 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
 
     try:
         extracted_data = json.loads(json_str)
-        print(f"Extracted: {extracted_data.get('name', 'N/A')} - {extracted_data.get('fiscal_year', 'N/A')}")
+        logger.info(f"Extracted: {extracted_data.get('name', 'N/A')} - {extracted_data.get('fiscal_year', 'N/A')}")
         return extracted_data
     except json.JSONDecodeError as e:
         raise Exception(f"Invalid JSON from Claude: {str(e)}")
