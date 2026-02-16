@@ -1,59 +1,176 @@
-from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
+import os
+import logging
+import time
+import threading
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+# Configure logging before other imports
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
 from database import get_db
 from models import BankDB
-import os
-import shutil
-from datetime import datetime
-from llm_service import extract_bank_data_from_file
-from camels_calculator import calculate_all_ratios, rate_capital, rate_asset_quality, rate_earnings, rate_liquidity, get_composite_rating
-from fastapi.middleware.cors import CORSMiddleware
+from camels_calculator import (
+    calculate_all_ratios, rate_capital, rate_asset_quality,
+    rate_management, rate_earnings, rate_liquidity,
+    get_composite_rating, generate_analysis_paragraphs
+)
 from job_manager import create_job, get_job, process_job_async
-import threading
 
-app = FastAPI()
+logger = logging.getLogger(__name__)
+
+# ===== Config =====
+UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
+MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
+ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
+
+CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+
+# Disable docs in production (set ENABLE_DOCS=true to enable)
+_enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
+
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# Thread pool to limit concurrent background jobs
+_job_executor = ThreadPoolExecutor(max_workers=4)
+
+# ===== App =====
+app = FastAPI(
+    title="CAMELS Analyzer API",
+    version="2.0.0",
+    docs_url="/docs" if _enable_docs else None,
+    redoc_url="/redoc" if _enable_docs else None,
+    openapi_url="/openapi.json" if _enable_docs else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # En prod, mets l'URL exacte du frontend
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=[o.strip() for o in CORS_ORIGINS],
+    allow_credentials=False,
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
-# ===== DOSSIER UPLOADS =====
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-# ===== MODÈLES PYDANTIC =====
+# ===== Rate Limiter =====
 
-class Bank(BaseModel):
+class RateLimiter:
+    """Simple in-memory rate limiter per IP address."""
+
+    def __init__(self, max_requests: int = 20, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str) -> bool:
+        """Return True if request is allowed, False if rate-limited."""
+        now = time.time()
+        # Prune old entries
+        self._requests[key] = [t for t in self._requests[key] if now - t < self.window]
+        if len(self._requests[key]) >= self.max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+
+# 20 requests per minute for uploads (each costs API credits)
+_upload_limiter = RateLimiter(max_requests=20, window_seconds=60)
+
+
+# ===== Helpers =====
+
+def _validate_upload(file: UploadFile) -> None:
+    """Validate file extension and size."""
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No filename provided")
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{ext}' not allowed. Accepted: {', '.join(ALLOWED_EXTENSIONS)}"
+        )
+
+
+async def _save_upload(file: UploadFile) -> tuple[str, str]:
+    """Save upload to disk, enforce size limit. Returns (file_path, filename)."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Sanitize filename: strip path separators and directory traversal
+    raw_name = file.filename or "upload"
+    safe_name = os.path.basename(raw_name).replace("..", "_").replace("\x00", "_")
+    safe_name = safe_name.replace("/", "_").replace("\\", "_")
+    filename = f"{timestamp}_{safe_name}"
+    file_path = os.path.join(UPLOAD_FOLDER, filename)
+
+    # Verify the resolved path is inside the upload folder (prevent traversal)
+    real_upload = os.path.realpath(UPLOAD_FOLDER)
+    real_path = os.path.realpath(file_path)
+    if not real_path.startswith(real_upload):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Read in chunks to limit memory for oversized files
+    max_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    chunks = []
+    total_read = 0
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1MB chunks
+        if not chunk:
+            break
+        total_read += len(chunk)
+        if total_read > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum is {MAX_UPLOAD_SIZE_MB} MB"
+            )
+        chunks.append(chunk)
+
+    with open(file_path, "wb") as buffer:
+        for chunk in chunks:
+            buffer.write(chunk)
+
+    return file_path, filename
+
+
+# ===== Pydantic models =====
+
+class BankCreate(BaseModel):
     name: str
     country: str
     total_assets: float
     currency: str = "XOF"
 
 
-class BankResponse(Bank):
+class BankResponse(BaseModel):
     id: int
-    
-    class Config:
-        from_attributes = True
+    name: str
+    country: str
+    total_assets: float
+    currency: str = "XOF"
 
 
-# ===== ROUTES DE BASE =====
+# ===== Routes =====
 
 @app.get("/")
 def home():
-    return {"message": "🏦 API CAMELS avec PostgreSQL !"}
+    return {"message": "CAMELS Analyzer API", "version": "2.0.0"}
 
 
-# ===== ROUTES BANQUES =====
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
-@app.post("/banks", response_model=BankResponse)
-def create_bank(bank: Bank, db: Session = Depends(get_db)):
-    """Crée une banque dans PostgreSQL"""
+
+@app.post("/banks")
+def create_bank(bank: BankCreate, db: Session = Depends(get_db)):
     db_bank = BankDB(
         bank_name=bank.name,
         country=bank.country,
@@ -63,229 +180,101 @@ def create_bank(bank: Bank, db: Session = Depends(get_db)):
     db.add(db_bank)
     db.commit()
     db.refresh(db_bank)
-    return db_bank
+    return {
+        "id": db_bank.id,
+        "name": db_bank.bank_name,
+        "country": db_bank.country,
+        "total_assets": db_bank.total_assets,
+        "currency": db_bank.currency,
+    }
 
 
 @app.get("/banks")
 def list_banks(db: Session = Depends(get_db)):
-    """Liste toutes les banques depuis PostgreSQL"""
     banks = db.query(BankDB).all()
     return {"total": len(banks), "banks": banks}
 
 
-@app.get("/banks/{bank_id}", response_model=BankResponse)
+@app.get("/banks/{bank_id}")
 def get_bank(bank_id: int, db: Session = Depends(get_db)):
-    """Récupère une banque par son ID"""
     bank = db.query(BankDB).filter(BankDB.id == bank_id).first()
     if not bank:
-        return {"error": "Banque introuvable"}
+        raise HTTPException(status_code=404, detail="Bank not found")
     return bank
 
 
-# ===== ROUTES UPLOAD =====
+# ===== Upload routes =====
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    """Upload un fichier simple"""
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"{UPLOAD_FOLDER}/{unique_filename}"
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
+    _validate_upload(file)
+    file_path, filename = await _save_upload(file)
     return {
-        "message": "Fichier uploadé avec succès !",
+        "message": "File uploaded",
         "filename": file.filename,
-        "saved_as": unique_filename,
-        "size": f"{file.size / 1024:.2f} KB",
-        "content_type": file.content_type,
-        "file_url": f"/uploads/{unique_filename}"
+        "saved_as": filename,
     }
 
 
 @app.get("/files")
 def list_files():
-    """Liste tous les fichiers uploadés"""
     if not os.path.exists(UPLOAD_FOLDER):
         return {"files": [], "total": 0}
-    
     files = os.listdir(UPLOAD_FOLDER)
-    return {"total": len(files), "files": files}
+    return {"total": len(files)}
 
 
-@app.post("/upload-and-extract")
-async def upload_and_extract(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """
-    Upload un fichier ET extrait automatiquement TOUTES les données CAMELS avec Claude.
-    Puis crée la banque automatiquement avec TOUS les champs !
-    """
-    # 1. Sauvegarder le fichier
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_filename = f"{timestamp}_{file.filename}"
-    file_path = f"{UPLOAD_FOLDER}/{unique_filename}"
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    
-    # 2. Extraire TOUTES les données avec Claude
-    try:
-        extracted_data = extract_bank_data_from_file(file_path)
-        
-        # 3. Créer la banque avec TOUS les champs extraits
-        db_bank = BankDB(
-            bank_name=extracted_data.get("name", "Inconnu"),
-            country=extracted_data.get("country", "Inconnu"),
-            fiscal_year=extracted_data.get("fiscal_year"),
-            currency=extracted_data.get("currency", "XOF"),
-            file_urls=file_path,
-            
-            # Actifs
-            total_assets=extracted_data.get("total_assets", 0),
-            cash_reserves_requirements=extracted_data.get("cash_reserves_requirements"),
-            due_from_banks=extracted_data.get("due_from_banks"),
-            investment_securities=extracted_data.get("investment_securities"),
-            gross_loans=extracted_data.get("gross_loans"),
-            loan_loss_provisions=extracted_data.get("loan_loss_provisions"),
-            foreclosed_assets=extracted_data.get("foreclosed_assets"),
-            investment_in_subs_affiliates=extracted_data.get("investment_in_subs_affiliates"),
-            other_assets=extracted_data.get("other_assets"),
-            fixed_assets=extracted_data.get("fixed_assets"),
-            
-            # Passifs
-            deposits=extracted_data.get("deposits"),
-            interbank_liabilities=extracted_data.get("interbank_liabilities"),
-            other_liabilities=extracted_data.get("other_liabilities"),
-            total_liabilities=extracted_data.get("total_liabilities"),
-            
-            # Equity
-            paid_in_capital=extracted_data.get("paid_in_capital"),
-            reserves=extracted_data.get("reserves"),
-            retained_earnings=extracted_data.get("retained_earnings"),
-            net_profit=extracted_data.get("net_profit"),
-            total_equity=extracted_data.get("total_equity"),
-            
-            # Compte de résultat
-            interest_income=extracted_data.get("interest_income"),
-            interest_expenses=extracted_data.get("interest_expenses"),
-            net_interest_income=extracted_data.get("net_interest_income"),
-            non_interest_income_commissions=extracted_data.get("non_interest_income_commissions"),
-            net_income_investment=extracted_data.get("net_income_investment"),
-            other_net_income=extracted_data.get("other_net_income"),
-            operating_expenses=extracted_data.get("operating_expenses"),
-            operating_profit=extracted_data.get("operating_profit"),
-            provision_expenses=extracted_data.get("provision_expenses"),
-            non_operating_profit_loss=extracted_data.get("non_operating_profit_loss"),
-            income_tax=extracted_data.get("income_tax"),
-            net_income=extracted_data.get("net_income"),
-            
-            # Ratios CAMELS
-            car_regulatory=extracted_data.get("car_regulatory"),
-            car_bank_reported=extracted_data.get("car_bank_reported"),
-            problem_assets_mn=extracted_data.get("problem_assets_mn"),
-            npls_mn=extracted_data.get("npls_mn"),
-            llr_mn=extracted_data.get("llr_mn"),
-            
-            # Taux de change
-            fx_rate_period_end=extracted_data.get("fx_rate_period_end"),
-            fx_rate_period_avg=extracted_data.get("fx_rate_period_avg")
-        )
-        
-        db.add(db_bank)
-        db.commit()
-        db.refresh(db_bank)
-        
-        return {
-            "message": "✅ Fichier uploadé, données extraites et banque créée !",
-            "file": unique_filename,
-            "extracted_data": extracted_data,
-            "bank_id": db_bank.id
-        }
-    
-    except Exception as e:
-        return {
-            "message": "❌ Erreur lors de l'extraction",
-            "file": unique_filename,
-            "error": str(e)
-        }
-
+# ===== Calculate & Rating routes =====
 
 @app.get("/banks/{bank_id}/calculate")
 def calculate_ratios(bank_id: int, db: Session = Depends(get_db)):
-    """
-    Calcule TOUS les ratios CAMELS pour une banque.
-    Met à jour la banque en DB avec les ratios calculés.
-    """
     bank = db.query(BankDB).filter(BankDB.id == bank_id).first()
-    
     if not bank:
-        return {"error": "Banque introuvable"}
-    
-    # Calculer tous les ratios
+        raise HTTPException(status_code=404, detail="Bank not found")
+
     bank = calculate_all_ratios(bank)
-    
-    # Sauvegarder en DB
     db.commit()
     db.refresh(bank)
-    
+
     return {
-        "message": "✅ Ratios calculés et sauvegardés !",
+        "message": "Ratios calculated",
         "bank_id": bank.id,
         "bank_name": bank.bank_name,
-        "ratios_calculated": {
-            "capital": {
-                "equity_assets": bank.equity_assets,
-                "car_regulatory": bank.car_regulatory
-            },
-            "asset_quality": {
-                "npl_ratio": bank.npl_ratio,
-                "coverage_ratio": bank.coverage_ratio,
-                "llr_avg_loan": bank.llr_avg_loan
-            },
-            "earnings": {
-                "roae": bank.roae,
-                "roaa": bank.roaa,
-                "net_interest_margin": bank.net_interest_margin,
-                "cost_to_income": bank.cost_to_income
-            },
-            "liquidity": {
-                "cash_reserves_assets": bank.cash_reserves_assets,
-                "gross_loans_deposits": bank.gross_loans_deposits
-            }
+        "ratios": {
+            "capital": {"equity_assets": bank.equity_assets, "debt_assets": bank.debt_assets},
+            "asset_quality": {"npl_ratio": bank.npl_ratio, "coverage_ratio": bank.coverage_ratio, "cost_of_risk_avg_assets": bank.cost_of_risk_avg_assets},
+            "management": {"cost_to_income": bank.cost_to_income},
+            "earnings": {"roaa": bank.roaa, "roae": bank.roae, "net_interest_income_avg_assets": bank.net_interest_income_avg_assets},
+            "liquidity": {"liquid_assets_total_assets": bank.liquid_assets_total_assets, "gross_loans_deposits": bank.gross_loans_deposits},
         }
     }
 
 
 @app.get("/banks/{bank_id}/rating")
 def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
-    """
-    Génère le RATING CAMELS complet pour une banque.
-    Note chaque pilier (C, A, E, L) et donne un rating composite.
-    """
     bank = db.query(BankDB).filter(BankDB.id == bank_id).first()
-    
     if not bank:
-        return {"error": "Banque introuvable"}
-    
-    # Calculer les ratios d'abord (au cas où)
+        raise HTTPException(status_code=404, detail="Bank not found")
+
     bank = calculate_all_ratios(bank)
     db.commit()
-    
-    # Noter chaque pilier
+
     ratings = {
         "capital": rate_capital(bank),
         "asset_quality": rate_asset_quality(bank),
+        "management": rate_management(bank),
         "earnings": rate_earnings(bank),
         "liquidity": rate_liquidity(bank),
-        "management": {"rating": None, "status": "Manual assessment required"}
     }
-    
-    # Rating composite
-    composite = get_composite_rating(ratings["capital"], ratings["asset_quality"], ratings["earnings"], ratings["liquidity"])
-    
+    composite = get_composite_rating(
+        ratings["capital"], ratings["asset_quality"],
+        ratings["management"], ratings["earnings"], ratings["liquidity"]
+    )
+    ratings["composite"] = composite
+
+    paragraphs = generate_analysis_paragraphs(bank, ratings)
+    db.commit()
+
     return {
         "bank_id": bank.id,
         "bank_name": bank.bank_name,
@@ -293,6 +282,7 @@ def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
         "country": bank.country,
         "camels_ratings": ratings,
         "composite_rating": composite,
+        "analysis": paragraphs,
         "summary": {
             "total_assets": bank.total_assets,
             "total_equity": bank.total_equity,
@@ -304,59 +294,36 @@ def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
     }
 
 
-# ===== ROUTES ASYNCHRONES (NOUVEAU) =====
+# ===== Async upload & analyze =====
 
 @app.post("/upload-and-analyze")
-async def upload_and_analyze(file: UploadFile = File(...)):
-    """
-    NOUVELLE VERSION ASYNCHRONE
-    
-    Upload un fichier et lance l'analyse en arrière-plan.
-    Retourne immédiatement un job_id pour suivre la progression.
-    
-    Utilise ensuite GET /job/{job_id} pour vérifier le statut.
-    """
-    # 1. Sauvegarder le fichier
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{timestamp}_{file.filename}"
-    file_path = os.path.join(UPLOAD_FOLDER, filename)
-    
-    with open(file_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
-    
-    # 2. Créer le job
+async def upload_and_analyze(request: Request, file: UploadFile = File(...)):
+    # Rate limiting per IP
+    client_ip = request.client.host if request.client else "unknown"
+    if not _upload_limiter.check(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before uploading again.")
+
+    _validate_upload(file)
+    file_path, filename = await _save_upload(file)
+
     job_id = create_job(file_path, filename)
-    
-    # 3. Lancer le traitement en arrière-plan (thread séparé)
-    thread = threading.Thread(target=process_job_async, args=(job_id, file_path))
-    thread.daemon = True
-    thread.start()
-    
-    # 4. Retourner immédiatement
+
+    # Use thread pool instead of unbounded thread creation
+    _job_executor.submit(process_job_async, job_id, file_path)
+
     return {
         "job_id": job_id,
         "status": "processing",
-        "message": "Analyse lancée en arrière-plan. Utilisez GET /job/{job_id} pour suivre la progression."
+        "message": "Analysis started. Poll GET /job/{job_id} for status."
     }
 
 
 @app.get("/job/{job_id}")
 async def get_job_status(job_id: str):
-    """
-    Récupère le statut d'un job d'analyse.
-    
-    Status possibles:
-    - "processing": En cours
-    - "completed": Terminé avec succès (result contient les données)
-    - "failed": Échec (error contient le message d'erreur)
-    """
     job = get_job(job_id)
-    
     if not job:
-        raise HTTPException(status_code=404, detail="Job introuvable")
-    
+        raise HTTPException(status_code=404, detail="Job not found")
+
     return {
         "job_id": job["id"],
         "status": job["status"],

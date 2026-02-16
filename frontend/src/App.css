@@ -7,8 +7,14 @@
 
 h1 {
   font-size: 2.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.3rem;
   color: #1a1a1a;
+}
+
+.subtitle {
+  color: #666;
+  font-size: 1.1rem;
+  margin-top: 0;
 }
 
 .upload-section {
@@ -25,7 +31,7 @@ input[type="file"] {
 }
 
 button {
-  background: #4CAF50;
+  background: #1565C0;
   color: white;
   border: none;
   padding: 12px 32px;
@@ -38,7 +44,7 @@ button {
 }
 
 button:hover:not(:disabled) {
-  background: #45a049;
+  background: #0D47A1;
 }
 
 button:disabled {
@@ -55,7 +61,33 @@ button:disabled {
   border-left: 4px solid #c62828;
 }
 
-/* LOADING (NOUVEAU) */
+.warning {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 1rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+  border-left: 4px solid #e65100;
+  text-align: left;
+}
+
+.warning ul {
+  margin: 0.5rem 0 0 1.2rem;
+  padding: 0;
+}
+
+.error-boundary {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+  background: #ffebee;
+  border-radius: 8px;
+  border: 1px solid #ef9a9a;
+  text-align: left;
+}
+
+/* LOADING */
 .loading-container {
   margin: 20px 0;
   padding: 20px;
@@ -87,6 +119,7 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+/* RESULTS CONTAINER */
 .result {
   background: #f5f5f5;
   padding: 2rem;
@@ -95,12 +128,13 @@ button:disabled {
   text-align: left;
 }
 
+/* BANK INFO HEADER */
 .bank-info {
   background: white;
   padding: 1.5rem;
   border-radius: 8px;
   margin-bottom: 1.5rem;
-  border-left: 5px solid #2196F3;
+  border-left: 5px solid #1565C0;
 }
 
 .bank-info h3 {
@@ -115,8 +149,9 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+/* COMPOSITE RATING */
 .rating-box {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
   color: white;
   padding: 2rem;
   border-radius: 12px;
@@ -143,6 +178,75 @@ button:disabled {
 .status-4 { background: #FF9800; color: white; }
 .status-5 { background: #F44336; color: white; }
 
+/* ANALYSIS BOXES */
+.analysis-box {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin: 1.5rem 0;
+  line-height: 1.7;
+  color: #333;
+  border-left: 4px solid #1565C0;
+}
+
+.analysis-box p {
+  margin: 0;
+}
+
+.analysis-paragraph {
+  padding: 1.2rem 1.5rem;
+  background: #f8f9fa;
+  border-left: 3px solid #90A4AE;
+  line-height: 1.7;
+  color: #444;
+  font-size: 0.95rem;
+}
+
+.analysis-paragraph p {
+  margin: 0;
+}
+
+/* CAMELS SECTIONS */
+.camels-section {
+  margin: 2rem 0;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.camels-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  color: white;
+}
+
+.camels-header h4 {
+  margin: 0 0 0.3rem 0;
+  font-size: 1.2rem;
+}
+
+.camels-letter {
+  font-size: 2rem;
+  font-weight: 800;
+  background: rgba(255,255,255,0.2);
+  width: 50px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+
+.capital-header    { background: #2E7D32; }
+.asset-header      { background: #E65100; }
+.management-header { background: #6A1B9A; }
+.earnings-header   { background: #1565C0; }
+.liquidity-header  { background: #00838F; }
+
 /* FINANCIAL STATEMENTS */
 .financial-statement {
   margin: 2rem 0;
@@ -155,7 +259,7 @@ button:disabled {
 .statement-header {
   padding: 1rem 1.5rem;
   margin: 0;
-  background: #1976D2;
+  background: #37474F;
   color: white;
   font-size: 1.2rem;
   font-weight: 600;
@@ -193,17 +297,17 @@ button:disabled {
 }
 
 .statement-table .section-title td {
-  background: #e3f2fd;
+  background: #ECEFF1;
   font-weight: 700;
-  color: #1565C0;
+  color: #37474F;
   padding: 0.8rem 1rem;
 }
 
 .statement-table .total-row td {
   background: #f5f5f5;
   font-weight: 700;
-  border-top: 2px solid #1976D2;
-  border-bottom: 2px solid #1976D2;
+  border-top: 2px solid #37474F;
+  border-bottom: 2px solid #37474F;
   padding: 1rem;
 }
 
@@ -217,7 +321,109 @@ button:disabled {
   background: #fafafa;
 }
 
-/* TABLEAUX DE RATIOS */
+/* RATIO TABLES */
+.ratio-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ratio-table thead {
+  background: #f5f5f5;
+}
+
+.ratio-table th {
+  padding: 0.8rem 1rem;
+  text-align: left;
+  font-weight: 600;
+  color: #444;
+  border-bottom: 2px solid #ddd;
+}
+
+.ratio-table td {
+  padding: 0.8rem 1rem;
+  border-bottom: 1px solid #eee;
+}
+
+.ratio-table td.formula {
+  color: #78909C;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.ratio-table td.value {
+  text-align: right;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.ratio-table tbody tr:hover {
+  background: #fafafa;
+}
+
+/* RATING BADGES */
+.rating-badge {
+  display: inline-block;
+  padding: 0.3rem 0.8rem;
+  border-radius: 15px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.rating-badge.rating-1 { background: rgba(255,255,255,0.3); }
+.rating-badge.rating-2 { background: rgba(255,255,255,0.3); }
+.rating-badge.rating-3 { background: rgba(255,255,255,0.3); }
+.rating-badge.rating-4 { background: rgba(255,255,255,0.3); }
+.rating-badge.rating-5 { background: rgba(255,255,255,0.3); }
+.rating-badge.rating-na { background: rgba(255,255,255,0.2); }
+
+/* KEY METRICS */
+.metrics-summary {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  margin-top: 2rem;
+}
+
+.metrics-summary h4 {
+  margin-top: 0;
+  color: #1a1a1a;
+  font-size: 1.4rem;
+}
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.metric-card {
+  background: #f5f7fa;
+  padding: 1.2rem;
+  border-radius: 10px;
+  text-align: center;
+  border: 1px solid #e0e0e0;
+}
+
+.metric-label {
+  display: block;
+  font-size: 0.8rem;
+  color: #666;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-value {
+  display: block;
+  font-size: 1.5rem;
+  color: #1a1a1a;
+  font-weight: bold;
+}
+
+/* LEGACY COMPAT */
 .ratio-section {
   margin: 2rem 0;
   background: white;
@@ -239,89 +445,3 @@ button:disabled {
 .section-header.earnings { background: #1565C0; }
 .section-header.liquidity { background: #00838F; }
 .section-header.dupont { background: #6A1B9A; }
-
-.ratio-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.ratio-table thead {
-  background: #f5f5f5;
-}
-
-.ratio-table th {
-  padding: 1rem;
-  text-align: left;
-  font-weight: 600;
-  color: #444;
-  border-bottom: 2px solid #ddd;
-}
-
-.ratio-table td {
-  padding: 1rem;
-  border-bottom: 1px solid #eee;
-}
-
-.ratio-table tbody tr:hover {
-  background: #fafafa;
-}
-
-.rating-badge {
-  display: inline-block;
-  padding: 0.4rem 1rem;
-  border-radius: 15px;
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.rating-badge.rating-1 { background: #C8E6C9; color: #2E7D32; }
-.rating-badge.rating-2 { background: #DCEDC8; color: #558B2F; }
-.rating-badge.rating-3 { background: #FFF9C4; color: #F57F17; }
-.rating-badge.rating-4 { background: #FFE0B2; color: #E65100; }
-.rating-badge.rating-5 { background: #FFCDD2; color: #C62828; }
-.rating-badge.rating-na { background: #EEEEEE; color: #757575; }
-
-/* MÉTRIQUES RÉSUMÉ */
-.metrics-summary {
-  background: white;
-  padding: 2rem;
-  border-radius: 12px;
-  margin-top: 2rem;
-}
-
-.metrics-summary h4 {
-  margin-top: 0;
-  color: #1a1a1a;
-  font-size: 1.4rem;
-}
-
-.metrics-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-}
-
-.metric-card {
-  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-  padding: 1.5rem;
-  border-radius: 10px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.metric-label {
-  display: block;
-  font-size: 0.9rem;
-  color: #666;
-  margin-bottom: 0.5rem;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-
-.metric-value {
-  display: block;
-  font-size: 1.8rem;
-  color: #1a1a1a;
-  font-weight: bold;
-}
