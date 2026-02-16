@@ -15,7 +15,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-RUN mkdir -p uploads
+# Create non-root user and give ownership of app directory
+RUN useradd --create-home appuser && \
+    mkdir -p uploads && \
+    chown -R appuser:appuser /app
+
+USER appuser
 
 EXPOSE 8000
 

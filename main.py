@@ -1,6 +1,9 @@
 import os
 import logging
+import time
 import threading
+from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 # Configure logging before other imports
@@ -10,7 +13,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-from fastapi import FastAPI, Depends, UploadFile, File, HTTPException
+from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -33,10 +36,22 @@ ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
 
+# Disable docs in production (set ENABLE_DOCS=true to enable)
+_enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
+
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+# Thread pool to limit concurrent background jobs
+_job_executor = ThreadPoolExecutor(max_workers=4)
+
 # ===== App =====
-app = FastAPI(title="CAMELS Analyzer API", version="2.0.0")
+app = FastAPI(
+    title="CAMELS Analyzer API",
+    version="2.0.0",
+    docs_url="/docs" if _enable_docs else None,
+    redoc_url="/redoc" if _enable_docs else None,
+    openapi_url="/openapi.json" if _enable_docs else None,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -45,6 +60,31 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+
+# ===== Rate Limiter =====
+
+class RateLimiter:
+    """Simple in-memory rate limiter per IP address."""
+
+    def __init__(self, max_requests: int = 20, window_seconds: int = 60):
+        self.max_requests = max_requests
+        self.window = window_seconds
+        self._requests: dict[str, list[float]] = defaultdict(list)
+
+    def check(self, key: str) -> bool:
+        """Return True if request is allowed, False if rate-limited."""
+        now = time.time()
+        # Prune old entries
+        self._requests[key] = [t for t in self._requests[key] if now - t < self.window]
+        if len(self._requests[key]) >= self.max_requests:
+            return False
+        self._requests[key].append(now)
+        return True
+
+
+# 20 requests per minute for uploads (each costs API credits)
+_upload_limiter = RateLimiter(max_requests=20, window_seconds=60)
 
 
 # ===== Helpers =====
@@ -64,20 +104,38 @@ def _validate_upload(file: UploadFile) -> None:
 async def _save_upload(file: UploadFile) -> tuple[str, str]:
     """Save upload to disk, enforce size limit. Returns (file_path, filename)."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    # Sanitize filename: strip path separators and directory traversal
+    raw_name = file.filename or "upload"
+    safe_name = os.path.basename(raw_name).replace("..", "_").replace("\x00", "_")
+    safe_name = safe_name.replace("/", "_").replace("\\", "_")
     filename = f"{timestamp}_{safe_name}"
     file_path = os.path.join(UPLOAD_FOLDER, filename)
 
-    content = await file.read()
-    size_mb = len(content) / (1024 * 1024)
-    if size_mb > MAX_UPLOAD_SIZE_MB:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File too large ({size_mb:.1f} MB). Maximum is {MAX_UPLOAD_SIZE_MB} MB"
-        )
+    # Verify the resolved path is inside the upload folder (prevent traversal)
+    real_upload = os.path.realpath(UPLOAD_FOLDER)
+    real_path = os.path.realpath(file_path)
+    if not real_path.startswith(real_upload):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+    # Read in chunks to limit memory for oversized files
+    max_bytes = MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    chunks = []
+    total_read = 0
+    while True:
+        chunk = await file.read(1024 * 1024)  # 1MB chunks
+        if not chunk:
+            break
+        total_read += len(chunk)
+        if total_read > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File too large. Maximum is {MAX_UPLOAD_SIZE_MB} MB"
+            )
+        chunks.append(chunk)
 
     with open(file_path, "wb") as buffer:
-        buffer.write(content)
+        for chunk in chunks:
+            buffer.write(chunk)
 
     return file_path, filename
 
@@ -91,11 +149,12 @@ class BankCreate(BaseModel):
     currency: str = "XOF"
 
 
-class BankResponse(BankCreate):
+class BankResponse(BaseModel):
     id: int
-
-    class Config:
-        from_attributes = True
+    name: str
+    country: str
+    total_assets: float
+    currency: str = "XOF"
 
 
 # ===== Routes =====
@@ -110,7 +169,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/banks", response_model=BankResponse)
+@app.post("/banks")
 def create_bank(bank: BankCreate, db: Session = Depends(get_db)):
     db_bank = BankDB(
         bank_name=bank.name,
@@ -121,7 +180,13 @@ def create_bank(bank: BankCreate, db: Session = Depends(get_db)):
     db.add(db_bank)
     db.commit()
     db.refresh(db_bank)
-    return db_bank
+    return {
+        "id": db_bank.id,
+        "name": db_bank.bank_name,
+        "country": db_bank.country,
+        "total_assets": db_bank.total_assets,
+        "currency": db_bank.currency,
+    }
 
 
 @app.get("/banks")
@@ -148,7 +213,6 @@ async def upload_file(file: UploadFile = File(...)):
         "message": "File uploaded",
         "filename": file.filename,
         "saved_as": filename,
-        "file_url": f"/uploads/{filename}"
     }
 
 
@@ -157,7 +221,7 @@ def list_files():
     if not os.path.exists(UPLOAD_FOLDER):
         return {"files": [], "total": 0}
     files = os.listdir(UPLOAD_FOLDER)
-    return {"total": len(files), "files": files}
+    return {"total": len(files)}
 
 
 # ===== Calculate & Rating routes =====
@@ -233,15 +297,19 @@ def get_camels_rating(bank_id: int, db: Session = Depends(get_db)):
 # ===== Async upload & analyze =====
 
 @app.post("/upload-and-analyze")
-async def upload_and_analyze(file: UploadFile = File(...)):
+async def upload_and_analyze(request: Request, file: UploadFile = File(...)):
+    # Rate limiting per IP
+    client_ip = request.client.host if request.client else "unknown"
+    if not _upload_limiter.check(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait before uploading again.")
+
     _validate_upload(file)
     file_path, filename = await _save_upload(file)
 
     job_id = create_job(file_path, filename)
 
-    thread = threading.Thread(target=process_job_async, args=(job_id, file_path))
-    thread.daemon = True
-    thread.start()
+    # Use thread pool instead of unbounded thread creation
+    _job_executor.submit(process_job_async, job_id, file_path)
 
     return {
         "job_id": job_id,

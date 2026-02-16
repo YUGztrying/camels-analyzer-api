@@ -59,6 +59,31 @@ button:disabled {
   border-radius: 6px;
   margin: 1rem 0;
   border-left: 4px solid #c62828;
+}
+
+.warning {
+  background: #fff3e0;
+  color: #e65100;
+  padding: 1rem;
+  border-radius: 6px;
+  margin: 1rem 0;
+  border-left: 4px solid #e65100;
+  text-align: left;
+}
+
+.warning ul {
+  margin: 0.5rem 0 0 1.2rem;
+  padding: 0;
+}
+
+.error-boundary {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+  background: #ffebee;
+  border-radius: 8px;
+  border: 1px solid #ef9a9a;
   text-align: left;
 }
 

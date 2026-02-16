@@ -132,6 +132,7 @@ def process_job_async(job_id: str, file_path: str):
         "fx_rate_period_end", "fx_rate_period_avg",
     ]
 
+    db = None
     try:
         # Step 1: Extract
         update_job(job_id, "processing", step="Extracting data from document...")
@@ -185,7 +186,6 @@ def process_job_async(job_id: str, file_path: str):
         db.commit()
 
         bank_dict = {k: v for k, v in bank.__dict__.items() if not k.startswith('_')}
-        db.close()
 
         result = {
             "message": "Analysis complete!",
@@ -219,3 +219,6 @@ def process_job_async(job_id: str, file_path: str):
         logger.error(f"Job {job_id} failed: {str(e)}")
         logger.error(traceback.format_exc())
         update_job(job_id, "failed", step="Failed", error=str(e))
+    finally:
+        if db is not None:
+            db.close()

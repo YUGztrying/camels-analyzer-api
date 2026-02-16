@@ -312,6 +312,69 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
     try:
         extracted_data = json.loads(json_str)
         logger.info(f"Extracted: {extracted_data.get('name', 'N/A')} - {extracted_data.get('fiscal_year', 'N/A')}")
+
+        # Validate the extracted data
+        validation_errors = validate_extracted_data(extracted_data)
+        if validation_errors:
+            logger.warning(f"Validation warnings: {validation_errors}")
+            extracted_data["_validation_warnings"] = validation_errors
+
         return extracted_data
     except json.JSONDecodeError as e:
         raise Exception(f"Invalid JSON from Claude: {str(e)}")
+
+
+def validate_extracted_data(data: dict) -> list[str]:
+    """
+    Validate LLM-extracted financial data for sanity.
+    Returns a list of warning/error strings. Empty list = all good.
+    """
+    errors = []
+
+    # --- Required fields ---
+    required_positive = ["total_assets", "total_equity"]
+    for field in required_positive:
+        val = data.get(field)
+        if val is None:
+            errors.append(f"Missing required field: {field}")
+            continue
+        try:
+            val = float(val)
+        except (ValueError, TypeError):
+            errors.append(f"{field} is not a valid number: {val}")
+            continue
+        if val < 0:
+            errors.append(f"{field} should not be negative: {val}")
+
+    # --- Cross-field sanity checks ---
+    ta = _to_float(data.get("total_assets"))
+    te = _to_float(data.get("total_equity"))
+    gl = _to_float(data.get("gross_loans"))
+    npls = _to_float(data.get("npls_mn"))
+    ni = _to_float(data.get("net_income"))
+
+    if ta and te and te > ta:
+        errors.append(f"Total equity ({te}) exceeds total assets ({ta}) — likely an extraction error")
+
+    if gl and npls and npls > gl:
+        errors.append(f"NPLs ({npls}) exceed gross loans ({gl}) — likely an extraction error")
+
+    if ta and ni and abs(ni) > ta:
+        errors.append(f"Net income ({ni}) exceeds total assets ({ta}) — likely an extraction error")
+
+    # --- Check that interest_expenses is positive (our convention) ---
+    ie = _to_float(data.get("interest_expenses"))
+    if ie is not None and ie < 0:
+        errors.append(f"interest_expenses should be positive (got {ie}); will take absolute value")
+
+    return errors
+
+
+def _to_float(val) -> float | None:
+    """Safely convert to float, return None on failure."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
