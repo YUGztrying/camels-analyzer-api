@@ -3,6 +3,7 @@ import logging
 import time
 import threading
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -50,10 +51,23 @@ logger.info(f"Docs enabled: {_enable_docs}")
 # Thread pool to limit concurrent background jobs
 _job_executor = ThreadPoolExecutor(max_workers=4)
 
+# ===== Lifespan (runs init_db on startup) =====
+
+@asynccontextmanager
+async def lifespan(app):
+    """Initialize database tables on startup."""
+    from init_db import init_database
+    init_database()
+    logger.info("Application startup complete.")
+    yield
+    logger.info("Application shutting down.")
+
+
 # ===== App =====
 app = FastAPI(
     title="CAMELS Analyzer API",
     version="2.0.0",
+    lifespan=lifespan,
     docs_url="/docs" if _enable_docs else None,
     redoc_url="/redoc" if _enable_docs else None,
     openapi_url="/openapi.json" if _enable_docs else None,
