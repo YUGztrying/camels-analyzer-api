@@ -28,6 +28,7 @@ from camels_calculator import (
 from job_manager import create_job, get_job, process_job_async
 
 logger = logging.getLogger(__name__)
+logger.info("Starting CAMELS Analyzer API...")
 
 # ===== Config =====
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
@@ -40,6 +41,11 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost
 _enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+logger.info(f"CORS origins: {CORS_ORIGINS}")
+logger.info(f"Upload folder: {UPLOAD_FOLDER}")
+logger.info(f"Max upload size: {MAX_UPLOAD_SIZE_MB} MB")
+logger.info(f"Docs enabled: {_enable_docs}")
 
 # Thread pool to limit concurrent background jobs
 _job_executor = ThreadPoolExecutor(max_workers=4)
@@ -166,7 +172,16 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Health check — verifies the app is running and DB is reachable."""
+    try:
+        from database import engine
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected"}
+    except Exception as e:
+        logger.error(f"Health check DB failure: {e}")
+        return {"status": "ok", "database": "unavailable"}
 
 
 @app.post("/banks")
