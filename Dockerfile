@@ -27,5 +27,5 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-# Default CMD; Railway overrides via railway.toml startCommand
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# start.py reads PORT from env (Railway sets it dynamically)
+CMD ["python", "start.py"]
