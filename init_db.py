@@ -9,8 +9,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger("init_db")
 
-MAX_RETRIES = 5
-RETRY_DELAY = 3  # seconds
+MAX_RETRIES = 20
+RETRY_DELAY = 5  # seconds
 
 
 def init_database():
@@ -41,7 +41,7 @@ def init_database():
                 time.sleep(RETRY_DELAY)
             else:
                 logger.error("All attempts exhausted. Could not initialize database.")
-                sys.exit(1)
+                raise RuntimeError("Database initialization failed after all retries")
 
 
 if __name__ == "__main__":

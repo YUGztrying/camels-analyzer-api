@@ -51,14 +51,26 @@ logger.info(f"Docs enabled: {_enable_docs}")
 # Thread pool to limit concurrent background jobs
 _job_executor = ThreadPoolExecutor(max_workers=4)
 
-# ===== Lifespan (runs init_db on startup) =====
+# ===== Lifespan (runs init_db in background) =====
+
+_db_ready = False
+
+def _init_db_background():
+    """Run init_db in a background thread so it doesn't block startup."""
+    global _db_ready
+    try:
+        from init_db import init_database
+        init_database()
+        _db_ready = True
+        logger.info("Background DB init complete.")
+    except Exception as e:
+        logger.error(f"Background DB init failed: {e}")
 
 @asynccontextmanager
 async def lifespan(app):
-    """Initialize database tables on startup."""
-    from init_db import init_database
-    init_database()
-    logger.info("Application startup complete.")
+    """Start app immediately, init DB in background."""
+    threading.Thread(target=_init_db_background, daemon=True).start()
+    logger.info("Application startup complete (DB init running in background).")
     yield
     logger.info("Application shutting down.")
 
@@ -186,16 +198,8 @@ def home():
 
 @app.get("/health")
 def health():
-    """Health check — verifies the app is running and DB is reachable."""
-    try:
-        from database import engine
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"status": "ok", "database": "connected"}
-    except Exception as e:
-        logger.error(f"Health check DB failure: {e}")
-        return {"status": "ok", "database": "unavailable"}
+    """Lightweight health check — returns immediately so Railway marks us healthy."""
+    return {"status": "ok", "database_ready": _db_ready}
 
 
 @app.post("/banks")
