@@ -209,5 +209,6 @@ __marimo__/
 # Project-specific
 uploads/
 *.backup
+*.db
 frontend/node_modules/
 frontend/dist/
