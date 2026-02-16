@@ -194,7 +194,36 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
 
     # --- Process by file type ---
 
-    if file_path.lower().endswith('.pdf'):
+    if file_path.lower().endswith(('.xlsx', '.xls')):
+        logger.info("Processing Excel file...")
+        from openpyxl import load_workbook
+
+        wb = load_workbook(file_path, data_only=True)
+        text = ""
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            text += f"\n\n{'='*80}\nSHEET: {sheet_name}\n{'='*80}\n\n"
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c) if c is not None else "" for c in row]
+                line = "\t".join(cells).strip()
+                if line:
+                    text += line + "\n"
+
+        logger.info(f"Excel extracted: {len(text)} characters from {len(wb.sheetnames)} sheet(s)")
+
+        if len(text.strip()) < 50:
+            raise Exception("Excel file appears empty or unreadable")
+
+        message = client.messages.create(
+            model="claude-3-5-haiku-20241022",
+            max_tokens=4096,
+            messages=[{
+                "role": "user",
+                "content": f"{prompt}\n\n{'='*80}\nDOCUMENT (EXCEL SPREADSHEET):\n{'='*80}\n\n{text[:100000]}"
+            }]
+        )
+
+    elif file_path.lower().endswith('.pdf'):
         logger.info("Processing PDF file...")
 
         reader = PdfReader(file_path)

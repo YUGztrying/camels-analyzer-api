@@ -4,7 +4,7 @@ export default function FileUpload({ onFileChange, onUpload, loading, file }) {
       <input
         type="file"
         onChange={onFileChange}
-        accept=".pdf,.png,.jpg,.jpeg"
+        accept=".pdf,.png,.jpg,.jpeg,.xlsx,.xls"
       />
       <button onClick={onUpload} disabled={loading || !file}>
         {loading ? 'Analyzing...' : 'Analyze'}
