@@ -1,0 +1,26 @@
+# render.yaml — Render Blueprint for one-click deploy
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: camels-analyzer-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: camels-db
+          property: connectionURI
+      - key: ANTHROPIC_API_KEY
+        sync: false  # manually set in Render dashboard
+      - key: CORS_ORIGINS
+        sync: false  # set to your Vercel frontend URL
+      - key: PYTHONUNBUFFERED
+        value: "1"
+    healthCheckPath: /health
+
+databases:
+  - name: camels-db
+    plan: free
+    databaseName: camels
+    user: camels_user
