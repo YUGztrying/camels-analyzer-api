@@ -1,11 +1,11 @@
 import './App.css';
 import { useAnalyzer } from './hooks/useAnalyzer';
+import { exportToExcel } from './utils/exportExcel';
 import ErrorBoundary from './components/ErrorBoundary';
 import FileUpload from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
 import CompositeRating from './components/CompositeRating';
 import CAMELSSection from './components/CAMELSSection';
-import { BalanceSheet, IncomeStatement } from './components/FinancialStatement';
 import MetricsGrid from './components/MetricsGrid';
 
 function App() {
@@ -47,6 +47,17 @@ function App() {
             <div className="bank-info">
               <h3>{bank?.bank_name || 'Unknown Bank'}</h3>
               <p>{bank?.country || ''} — Fiscal Year {bank?.fiscal_year || ''} — {bank?.currency || 'XOF'}</p>
+            </div>
+
+            <div className="export-bar">
+              <button className="export-btn" onClick={() => exportToExcel(result)}>
+                <svg className="export-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Export to Excel
+              </button>
             </div>
 
             <CompositeRating camelsRating={result?.camels_rating} analysis={analysis} />
@@ -115,8 +126,6 @@ function App() {
               ]}
             />
 
-            <BalanceSheet bank={bank} />
-            <IncomeStatement bank={bank} />
             <MetricsGrid metrics={km} />
           </div>
         )}
