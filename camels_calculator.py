@@ -186,13 +186,19 @@ def calculate_all_ratios(bank, prev_bank=None):
         net_profit = _get(bank, 'net_profit')
 
     # ROAA & ROAE — direct formula, with reported fallback
+    # Cap at ±100% to prevent misleading values from tiny denominators
+    # (e.g. equity swinging from negative to positive creates near-zero average)
     bank.roaa = _safe_divide(net_profit, avg_assets)
+    if bank.roaa is not None and abs(bank.roaa) > 1.0:
+        bank.roaa = None  # discard implausible value
     if bank.roaa is None:
         reported = _get(bank, 'roa_reported')
         if reported is not None:
             bank.roaa = reported / 100.0
 
     bank.roae = _safe_divide(net_profit, avg_equity)
+    if bank.roae is not None and abs(bank.roae) > 1.0:
+        bank.roae = None  # discard implausible value
     if bank.roae is None:
         reported = _get(bank, 'roe_reported')
         if reported is not None:

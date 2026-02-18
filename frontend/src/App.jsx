@@ -1,21 +1,17 @@
 import './App.css';
 import { useAnalyzer } from './hooks/useAnalyzer';
 import { exportToExcel } from './utils/exportExcel';
+import { fmtPct, fmtNum } from './utils/formatters';
 import ErrorBoundary from './components/ErrorBoundary';
 import FileUpload from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
-import CompositeRating from './components/CompositeRating';
-import CAMELSSection from './components/CAMELSSection';
-import MetricsGrid from './components/MetricsGrid';
 
 function App() {
   const { file, loading, progress, result, error, handleFileChange, handleUpload } = useAnalyzer();
 
-  const bank = result?.bank;
-  const ratings = result?.detailed_ratings;
-  const analysis = result?.analysis;
-  const km = result?.key_metrics;
-  const warnings = result?.bank?._validation_warnings;
+  const periods = result?.all_periods || (result ? [result] : []);
+  const latest = periods[periods.length - 1];
+  const analysis = latest?.analysis;
 
   return (
     <ErrorBoundary>
@@ -33,20 +29,15 @@ function App() {
         {loading && <LoadingSpinner progress={progress} />}
         {error && <div className="error">{error}</div>}
 
-        {warnings && warnings.length > 0 && (
-          <div className="warning">
-            <strong>Data quality warnings:</strong>
-            <ul>
-              {warnings.map((w, i) => <li key={i}>{w}</li>)}
-            </ul>
-          </div>
-        )}
-
-        {result && (
+        {result && periods.length > 0 && (
           <div className="result">
             <div className="bank-info">
-              <h3>{bank?.bank_name || 'Unknown Bank'}</h3>
-              <p>{bank?.country || ''} — Fiscal Year {bank?.fiscal_year || ''} — {bank?.currency || 'XOF'}</p>
+              <h3>{latest?.bank?.bank_name || result?.file || 'Unknown Bank'}</h3>
+              <p>
+                {latest?.bank?.country ? `${latest.bank.country} — ` : ''}
+                {periods.length} period{periods.length > 1 ? 's' : ''}: {periods.map(p => p.period_label || p.bank?.fiscal_year).join(', ')}
+                {' — '}{latest?.bank?.currency || 'XOF'}
+              </p>
             </div>
 
             <div className="export-bar">
@@ -60,77 +51,178 @@ function App() {
               </button>
             </div>
 
-            <CompositeRating camelsRating={result?.camels_rating} analysis={analysis} />
+            {/* CAMELS Ratings */}
+            <SectionBlock title="CAMELS Ratings" cls="ratings-section-header">
+              <table className="evo-table">
+                <thead>
+                  <tr>
+                    <th>Component</th>
+                    {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  <RatingRow label="Composite" periods={periods} path="composite" composite />
+                  <RatingRow label="C - Capital" periods={periods} path="capital" />
+                  <RatingRow label="A - Asset Quality" periods={periods} path="asset_quality" />
+                  <RatingRow label="M - Management" periods={periods} path="management" />
+                  <RatingRow label="E - Earnings" periods={periods} path="earnings" />
+                  <RatingRow label="L - Liquidity" periods={periods} path="liquidity" />
+                </tbody>
+              </table>
+            </SectionBlock>
 
-            <CAMELSSection
-              letter="C"
-              title="Capital Adequacy"
-              headerClass="capital-header"
-              rating={ratings?.capital}
-              analysis={analysis?.capital}
-              ratios={[
-                { name: 'Equity / Assets', formula: "Shareholders' Equity / Total Assets", value: km?.equity_assets },
-                { name: 'Debt / Assets', formula: '(Short-Term Borrowings + Long-Term Debt) / Total Assets', value: km?.debt_assets },
-              ]}
-            />
+            {/* C - Capital */}
+            <SectionBlock title="C — Capital Adequacy" cls="capital-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
+                { label: 'Debt / Assets', key: 'debt_assets', src: 'km' },
+              ]} />
+            </SectionBlock>
 
-            <CAMELSSection
-              letter="A"
-              title="Asset Quality"
-              headerClass="asset-header"
-              rating={ratings?.asset_quality}
-              analysis={analysis?.asset_quality}
-              ratios={[
-                { name: 'NPL Ratio', formula: 'NPLs (Stage 3) / Gross Loans', value: km?.npl_ratio },
-                { name: 'Coverage Ratio', formula: 'Loan Loss Provisions (ECL) / NPLs', value: km?.coverage_ratio },
-                { name: 'Cost of Risk / Avg Assets', formula: 'ECL / Average Total Assets', value: km?.cost_of_risk_avg_assets },
-              ]}
-            />
+            {/* A - Asset Quality */}
+            <SectionBlock title="A — Asset Quality" cls="asset-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'NPL Ratio', key: 'npl_ratio', src: 'km' },
+                { label: 'Coverage Ratio', key: 'coverage_ratio', src: 'km' },
+                { label: 'Cost of Risk / Avg Assets', key: 'cost_of_risk_avg_assets', src: 'km' },
+              ]} />
+            </SectionBlock>
 
-            <CAMELSSection
-              letter="M"
-              title="Management (Efficiency)"
-              headerClass="management-header"
-              rating={ratings?.management}
-              analysis={analysis?.management}
-              ratios={[
-                { name: 'Cost-to-Income Ratio', formula: 'Operating Expenses / Operating Income', value: km?.cost_to_income },
-              ]}
-            />
+            {/* M - Management */}
+            <SectionBlock title="M — Management (Efficiency)" cls="management-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'Cost-to-Income', key: 'cost_to_income', src: 'km' },
+              ]} />
+            </SectionBlock>
 
-            <CAMELSSection
-              letter="E"
-              title="Earnings"
-              headerClass="earnings-header"
-              rating={ratings?.earnings}
-              analysis={analysis?.earnings}
-              ratios={[
-                { name: 'ROAA', formula: 'Net Profit / Average Total Assets', value: km?.roaa },
-                { name: 'ROAE', formula: "Net Profit / Average Shareholders' Equity", value: km?.roae },
-                { name: 'Net Interest Income / Avg Assets', formula: 'Net Interest Income / Avg Total Assets', value: bank?.net_interest_income_avg_assets },
-                { name: 'Non-Interest Income / Avg Assets', formula: '(Fees & Commissions + Net Sales + Dividends + ...) / Avg Total Assets', value: bank?.non_interest_income_avg_assets },
-                { name: 'Operating Expenses / Avg Assets', formula: '(Wages + Other OpEx + Amortization + Depreciation) / Avg Total Assets', value: bank?.opex_avg_assets },
-                { name: 'Tax Expenses / Avg Assets', formula: 'Tax Expenses / Avg Total Assets', value: bank?.tax_expenses_avg_assets },
-                { name: 'Other Income / Avg Assets', formula: '(Provisions Formed + Impairment + FX Exchange) / Avg Total Assets', value: bank?.other_income_avg_assets },
-              ]}
-            />
+            {/* E - Earnings */}
+            <SectionBlock title="E — Earnings" cls="earnings-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'ROAA', key: 'roaa', src: 'km' },
+                { label: 'ROAE', key: 'roae', src: 'km' },
+                { label: 'NII / Avg Assets', key: 'net_interest_income_avg_assets', src: 'bank' },
+                { label: 'Non-Interest Inc / Avg Assets', key: 'non_interest_income_avg_assets', src: 'bank' },
+                { label: 'OpEx / Avg Assets', key: 'opex_avg_assets', src: 'bank' },
+                { label: 'Tax / Avg Assets', key: 'tax_expenses_avg_assets', src: 'bank' },
+              ]} />
+            </SectionBlock>
 
-            <CAMELSSection
-              letter="L"
-              title="Liquidity"
-              headerClass="liquidity-header"
-              rating={ratings?.liquidity}
-              analysis={analysis?.liquidity}
-              ratios={[
-                { name: 'Liquid Assets / Total Assets', formula: '(Cash & Deposits with Banks + Investment Securities) / Total Assets', value: km?.liquid_assets_total_assets },
-              ]}
-            />
+            {/* L - Liquidity */}
+            <SectionBlock title="L — Liquidity" cls="liquidity-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'Liquid Assets / Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
+                { label: 'Gross Loans / Deposits', key: 'loans_deposits', src: 'km' },
+              ]} />
+            </SectionBlock>
 
-            <MetricsGrid metrics={km} />
+            {/* Key Financials */}
+            <SectionBlock title="Key Financials" cls="financials-header">
+              <table className="evo-table">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    ['Total Assets', 'total_assets'],
+                    ['Gross Loans', 'gross_loans'],
+                    ['Total Deposits', 'deposits'],
+                    ['Total Equity', 'total_equity'],
+                    ['Interest Income', 'interest_income'],
+                    ['Interest Expenses', 'interest_expenses'],
+                    ['Net Interest Income', 'net_interest_income'],
+                    ['Operating Income (PNB)', 'operating_income'],
+                    ['Operating Expenses', 'operating_expenses'],
+                    ['Provision Expenses', 'provision_expenses'],
+                    ['Net Income', 'net_income'],
+                  ].map(([label, key]) => (
+                    <tr key={key}>
+                      <td className="row-label">{label}</td>
+                      {periods.map((p, i) => (
+                        <td key={i} className="pc num-cell">{fmtNum(p.bank?.[key])}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </SectionBlock>
+
+            {/* Analysis - latest period */}
+            {analysis && (
+              <div className="analysis-section">
+                <h3>Analysis — {latest.period_label || latest.bank?.fiscal_year}</h3>
+                {['composite', 'capital', 'asset_quality', 'management', 'earnings', 'liquidity'].map(key => (
+                  analysis[key] ? (
+                    <div key={key} className="analysis-block">
+                      <h5>{key === 'asset_quality' ? 'Asset Quality' : key.charAt(0).toUpperCase() + key.slice(1)}</h5>
+                      <p>{analysis[key]}</p>
+                    </div>
+                  ) : null
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
     </ErrorBoundary>
+  );
+}
+
+
+/* ─── Sub-components ─────────────────────────────────────────────────── */
+
+function SectionBlock({ title, cls, children }) {
+  return (
+    <div className="evo-section">
+      <div className={`evo-header ${cls || ''}`}><h4>{title}</h4></div>
+      {children}
+    </div>
+  );
+}
+
+function RatingRow({ label, periods, path, composite }) {
+  return (
+    <tr className={composite ? 'composite-row' : ''}>
+      <td className="row-label">{label}</td>
+      {periods.map((p, i) => {
+        const r = composite ? p.camels_rating : p.detailed_ratings?.[path];
+        const rating = r?.rating ?? r?.composite_rating;
+        const status = r?.status;
+        return (
+          <td key={i} className="pc">
+            {rating ? (
+              <span className={`rpill r-${rating}`}>{rating} — {status}</span>
+            ) : <span className="na">N/A</span>}
+          </td>
+        );
+      })}
+    </tr>
+  );
+}
+
+function RatioTable({ periods, rows }) {
+  return (
+    <table className="evo-table">
+      <thead>
+        <tr>
+          <th>Ratio</th>
+          {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, ri) => (
+          <tr key={ri}>
+            <td className="row-label">{r.label}</td>
+            {periods.map((p, pi) => {
+              const val = r.src === 'km' ? p.key_metrics?.[r.key] : p.bank?.[r.key];
+              return <td key={pi} className="pc num-cell">{fmtPct(val)}</td>;
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

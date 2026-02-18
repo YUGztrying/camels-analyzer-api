@@ -48,9 +48,12 @@ _ASSETS_MFI = {
     # Loans
     "Gross Loans":                                  "gross_loans",
     "Less: Allowance for Loan Loss Reserve":        "loan_loss_provisions",    # stored +, negated in post-proc
+    "Less: Reserves for Impaired Loans (NPLs) (-)": "loan_loss_provisions",   # bank variant
     # Earning deposits at other banks
     "Interest Bearing Deposits":                    "due_from_banks",
     "Other Earning Assets":                         "due_from_banks",          # wins if present
+    "Total Other Earning Assets":                   "due_from_banks",          # wins
+    "Total Earning Assets":                         None,                      # skip (derived)
     # Fixed & other
     "Net Fixed Assets":                             "fixed_assets",
     "Investments in Subsidiaries/Affiliates":       "investment_in_subs_affiliates",
@@ -63,13 +66,20 @@ _ASSETS_MFI = {
 _ASSETS_BANK_EXTRA = {
     # Banks may use a slightly different cash label
     "Cash & Due from Banks":                        "cash_reserves_requirements",
-    # Bank loan granulars (all overwritten by Gross Loans total — that label is same)
+    # Bank loan granulars — all overwritten by "Gross Loans" total
+    "Corporate & Commercial Loans and Leases":      "gross_loans",
+    "Retail Loans and Leases (incl. Residential Mortgage)": "gross_loans",
+    "Loans and Leases to Banks":                    "gross_loans",
+    "Loans and Leases to Governments":              "gross_loans",
+    "Other Loans and Leases":                       "gross_loans",
     "Loans - Corporate":                            "gross_loans",
     "Loans - Retail":                               "gross_loans",
     "Loans - Banks":                                "gross_loans",
     "Loans - Government":                           "gross_loans",
     "Loans - Other":                                "gross_loans",
     "Gross Loans to Customers":                     "gross_loans",             # wins
+    # Skip unearned income (already netted in most cases)
+    "Less: Unearned Income (-)":                    None,
     # Derivatives / repos → due_from_banks (short-term liquid)
     "Repurchase Agreements (Assets)":               "due_from_banks",
 }
@@ -282,6 +292,7 @@ def parse_irp_excel(file_path: str) -> list[dict]:
 
     for row in rows:
         col_a = str(row[0] or "").strip()
+        col_a = col_a.replace('\u00a0', ' ')   # normalize non-breaking spaces
         col_a_lower = col_a.lower()
 
         # Detect section delimiter
