@@ -651,3 +651,46 @@ button:disabled {
   font-size: 0.93rem;
   margin-bottom: 0.5rem;
 }
+
+/* Editable cells */
+.editable-cell {
+  cursor: pointer;
+  position: relative;
+}
+
+.editable-cell:hover {
+  background: #e3f2fd;
+}
+
+.editing-cell {
+  padding: 0.2rem 0.3rem;
+}
+
+.cell-input {
+  width: 80px;
+  padding: 0.3rem 0.4rem;
+  border: 2px solid #1565C0;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  text-align: right;
+  outline: none;
+}
+
+.cell-input:focus {
+  box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.3);
+}
+
+.edit-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.65rem;
+  color: #1565C0;
+  background: #e3f2fd;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}

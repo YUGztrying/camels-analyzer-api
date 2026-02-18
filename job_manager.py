@@ -165,6 +165,7 @@ def _rate_and_analyse(bank, db) -> tuple[dict, dict]:
     paragraphs = generate_analysis_paragraphs(bank, ratings)
     bank.analysis_complete = True
     db.commit()
+    db.refresh(bank)  # reload all attributes — commit expires them
     return ratings, paragraphs
 
 

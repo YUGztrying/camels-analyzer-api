@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import './App.css';
 import { useAnalyzer } from './hooks/useAnalyzer';
 import { exportToExcel } from './utils/exportExcel';
@@ -8,10 +9,56 @@ import LoadingSpinner from './components/LoadingSpinner';
 
 function App() {
   const { file, loading, progress, result, error, handleFileChange, handleUpload } = useAnalyzer();
+  // overrides[periodIndex][fieldKey] = user-entered value (decimal for ratios)
+  const [overrides, setOverrides] = useState({});
 
   const periods = result?.all_periods || (result ? [result] : []);
   const latest = periods[periods.length - 1];
   const analysis = latest?.analysis;
+
+  const setOverride = (pi, key, val) => {
+    setOverrides(prev => ({
+      ...prev,
+      [pi]: { ...prev[pi], [key]: val },
+    }));
+  };
+
+  // Get value with override priority
+  const getVal = (pi, key, src) => {
+    if (overrides[pi]?.[key] !== undefined) return overrides[pi][key];
+    const p = periods[pi];
+    return src === 'km' ? p?.key_metrics?.[key] : p?.bank?.[key];
+  };
+
+  // Recompute derived ratios from overrides + original data
+  const getDerived = (pi) => {
+    const p = periods[pi];
+    const b = p?.bank || {};
+    const o = overrides[pi] || {};
+    const gl = o.gross_loans ?? b.gross_loans;
+    const llp = o.loan_loss_provisions ?? b.loan_loss_provisions;
+    const npls = o.npls_mn ?? b.npls_mn;
+
+    const derived = {};
+    // NPL ratio from NPL amount
+    if (npls != null && gl != null && gl !== 0) {
+      derived.npl_ratio = npls / gl;
+    }
+    // Coverage from LLP / NPLs
+    if (llp != null && npls != null && npls !== 0) {
+      derived.coverage_ratio = Math.abs(llp) / npls;
+    }
+    return derived;
+  };
+
+  // Get ratio value: override > derived > original
+  const getRatio = (pi, key) => {
+    if (overrides[pi]?.[key] !== undefined) return overrides[pi][key];
+    const derived = getDerived(pi);
+    if (derived[key] !== undefined) return derived[key];
+    const p = periods[pi];
+    return p?.key_metrics?.[key];
+  };
 
   return (
     <ErrorBoundary>
@@ -110,34 +157,34 @@ function App() {
             {/* ── Solvency Ratios ── */}
             <SectionBlock title="Solvency Ratios" cls="capital-header">
               <RatioTable periods={periods} rows={[
-                { label: 'CAR - Regulatory', key: 'car', src: 'km' },
-                { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
-              ]} />
+                { label: 'CAR - Regulatory', key: 'car', editable: true },
+                { label: 'Equity / Assets', key: 'equity_assets' },
+              ]} getRatio={getRatio} setOverride={setOverride} />
             </SectionBlock>
 
             {/* ── Asset Quality ── */}
             <SectionBlock title="Asset Quality" cls="asset-header">
               <RatioTable periods={periods} rows={[
-                { label: 'NPL Ratio', key: 'npl_ratio', src: 'km' },
-                { label: 'Coverage Ratio', key: 'coverage_ratio', src: 'km' },
-              ]} />
+                { label: 'NPL Ratio', key: 'npl_ratio', editable: true },
+                { label: 'Coverage Ratio', key: 'coverage_ratio', editable: true },
+              ]} getRatio={getRatio} setOverride={setOverride} />
             </SectionBlock>
 
             {/* ── Profitability ── */}
             <SectionBlock title="Profitability" cls="earnings-header">
               <RatioTable periods={periods} rows={[
-                { label: 'ROAA', key: 'roaa', src: 'km' },
-                { label: 'ROAE', key: 'roae', src: 'km' },
-                { label: 'Cost to Income Ratio', key: 'cost_to_income', src: 'km' },
-              ]} />
+                { label: 'ROAA', key: 'roaa' },
+                { label: 'ROAE', key: 'roae' },
+                { label: 'Cost to Income Ratio', key: 'cost_to_income' },
+              ]} getRatio={getRatio} setOverride={setOverride} />
             </SectionBlock>
 
             {/* ── Liquidity ── */}
             <SectionBlock title="Liquidity" cls="liquidity-header">
               <RatioTable periods={periods} rows={[
-                { label: 'Loans/Deposits', key: 'loans_deposits', src: 'km' },
-                { label: 'Liquid Assets/Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
-              ]} />
+                { label: 'Loans/Deposits', key: 'loans_deposits' },
+                { label: 'Liquid Assets/Total Assets', key: 'liquid_assets_total_assets' },
+              ]} getRatio={getRatio} setOverride={setOverride} />
             </SectionBlock>
 
             {/* ── Analysis ── */}
@@ -247,7 +294,7 @@ function GrowthTable({ periods, rows }) {
   );
 }
 
-function RatioTable({ periods, rows }) {
+function RatioTable({ periods, rows, getRatio, setOverride }) {
   return (
     <table className="evo-table">
       <thead><tr>
@@ -257,15 +304,70 @@ function RatioTable({ periods, rows }) {
       <tbody>
         {rows.map((r, ri) => (
           <tr key={ri}>
-            <td className="row-label">{r.label}</td>
+            <td className="row-label">
+              {r.label}
+              {r.editable && <span className="edit-tag">editable</span>}
+            </td>
             {periods.map((p, pi) => {
-              const val = r.src === 'km' ? p.key_metrics?.[r.key] : p.bank?.[r.key];
+              const val = getRatio ? getRatio(pi, r.key) : (p.key_metrics?.[r.key]);
+              if (r.editable) {
+                return (
+                  <EditableRatioCell
+                    key={pi}
+                    value={val}
+                    onSave={(v) => setOverride(pi, r.key, v)}
+                  />
+                );
+              }
               return <td key={pi} className="pc num-cell">{fmtPct(val)}</td>;
             })}
           </tr>
         ))}
       </tbody>
     </table>
+  );
+}
+
+function EditableRatioCell({ value, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [input, setInput] = useState('');
+
+  const startEdit = () => {
+    setInput(value != null ? (value * 100).toFixed(2) : '');
+    setEditing(true);
+  };
+
+  const commit = () => {
+    setEditing(false);
+    const parsed = parseFloat(input);
+    if (!isNaN(parsed)) {
+      onSave(parsed / 100); // convert percentage to decimal
+    }
+  };
+
+  if (editing) {
+    return (
+      <td className="pc num-cell editing-cell">
+        <input
+          type="number"
+          step="0.01"
+          className="cell-input"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+          autoFocus
+          placeholder="%"
+        />
+      </td>
+    );
+  }
+
+  const isOverridden = value != null && onSave;
+  return (
+    <td className={`pc num-cell editable-cell`} onClick={startEdit} title="Click to edit">
+      <span className={isOverridden && value != null ? '' : ''}>{fmtPct(value)}</span>
+    </td>
   );
 }
 
@@ -277,7 +379,6 @@ function AnalysisBlock({ title, section, analysis, ratings, isComposite }) {
   const rating = r?.rating ?? r?.composite_rating;
   const status = r?.status;
 
-  // Handle both old format (string) and new format (array of bullets)
   const bullets = Array.isArray(data) ? data : [data];
 
   return (
