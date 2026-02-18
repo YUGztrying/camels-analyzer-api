@@ -694,3 +694,139 @@ button:disabled {
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
+
+/* ──────────────────────────────────────────────────────────────────────
+   INPUT MODAL (post-extraction CAR / NPL input)
+   ────────────────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 600px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: left;
+}
+
+.modal-content h3 {
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+  font-size: 1.4rem;
+}
+
+.modal-desc {
+  color: #666;
+  font-size: 0.93rem;
+  line-height: 1.5;
+  margin: 0 0 1.5rem 0;
+}
+
+.modal-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.modal-period {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  border: 1px solid #e0e0e0;
+}
+
+.modal-period-label {
+  margin: 0 0 0.8rem 0;
+  font-size: 1rem;
+  color: #1565C0;
+  font-weight: 600;
+}
+
+.modal-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.modal-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.modal-field input {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: 'Courier New', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.modal-field input:focus {
+  border-color: #1565C0;
+  box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.15);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eee;
+}
+
+.modal-skip {
+  background: #f5f5f5;
+  color: #555;
+  border: 1px solid #ccc;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0;
+  transition: background 0.2s;
+}
+
+.modal-skip:hover {
+  background: #e0e0e0;
+}
+
+.modal-confirm {
+  background: #1565C0;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0;
+  transition: background 0.2s;
+}
+
+.modal-confirm:hover {
+  background: #0D47A1;
+}

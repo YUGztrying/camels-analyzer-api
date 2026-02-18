@@ -6,6 +6,7 @@ export function useAnalyzer() {
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState('');
   const [result, setResult] = useState(null);
+  const [pendingResult, setPendingResult] = useState(null);
   const [error, setError] = useState(null);
 
   const handleFileChange = (e) => {
@@ -22,6 +23,7 @@ export function useAnalyzer() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setPendingResult(null);
     setProgress('Uploading...');
 
     try {
@@ -29,7 +31,7 @@ export function useAnalyzer() {
         setProgress(step);
       });
       setProgress('');
-      setResult(data);
+      setPendingResult(data);
     } catch (err) {
       setError('Analysis error: ' + err.message);
       setProgress('');
@@ -38,5 +40,13 @@ export function useAnalyzer() {
     }
   };
 
-  return { file, loading, progress, result, error, handleFileChange, handleUpload };
+  const confirmResult = () => {
+    setResult(pendingResult);
+    setPendingResult(null);
+  };
+
+  return {
+    file, loading, progress, result, pendingResult, error,
+    handleFileChange, handleUpload, confirmResult,
+  };
 }

@@ -228,7 +228,7 @@ def _process_irp_job(job_id: str, file_path: str) -> dict:
     with the most recent as the primary display target.
     """
     from irp_parser import parse_irp_excel
-    from camels_calculator import calculate_all_ratios
+    from camels_calculator import calculate_all_ratios, generate_analysis_paragraphs
 
     update_job(job_id, "processing", step="Parsing IRP Report (structured Excel)...")
     periods = parse_irp_excel(file_path)
@@ -264,6 +264,16 @@ def _process_irp_job(job_id: str, file_path: str) -> dict:
 
         # Most recent period = last (sorted oldest→newest by parse_irp_excel)
         latest_bank, latest_ratings, latest_paragraphs, latest_data = saved_banks[-1]
+
+        # Re-generate latest period's analysis with multi-period evolution context
+        if len(saved_banks) > 1:
+            all_bank_objs = [b for b, _, _, _ in saved_banks]
+            latest_paragraphs = generate_analysis_paragraphs(
+                latest_bank, latest_ratings, all_banks=all_bank_objs,
+            )
+            db.commit()
+            db.refresh(latest_bank)
+            saved_banks[-1] = (latest_bank, latest_ratings, latest_paragraphs, latest_data)
 
         # Build per-period summary list (oldest→newest)
         all_periods = []

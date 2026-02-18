@@ -460,15 +460,58 @@ def _fmt_abs(value):
     return f"{abs(value):,.0f}"
 
 
-def generate_analysis_paragraphs(bank, ratings):
+def _cagr(start, end, n_years):
+    """Compound annual growth rate."""
+    if start is None or end is None or n_years is None or n_years <= 0:
+        return None
+    if start <= 0 or end <= 0:
+        return None
+    return (end / start) ** (1 / n_years) - 1
+
+
+def _trend_word(first_val, last_val):
+    """Return a trend verb comparing two values."""
+    if first_val is None or last_val is None:
+        return "changed"
+    if last_val > first_val * 1.005:
+        return "improved" if last_val > first_val else "increased"
+    elif last_val < first_val * 0.995:
+        return "declined"
+    return "remained stable"
+
+
+def _ratio_trend(first_val, last_val, higher_is_better=True):
+    """Return a trend verb for a ratio, taking direction into account."""
+    if first_val is None or last_val is None:
+        return "changed"
+    diff = last_val - first_val
+    if abs(diff) < 0.001:
+        return "remained stable"
+    if higher_is_better:
+        return "improved" if diff > 0 else "deteriorated"
+    else:
+        return "improved" if diff < 0 else "deteriorated"
+
+
+def generate_analysis_paragraphs(bank, ratings, all_banks=None):
     """
     Generate bullet-point analyst-style analysis for each CAMELS component.
     Returns a dict mapping component keys to *lists* of bullet strings.
     Also stores a joined text version on the bank object for DB persistence.
+
+    If *all_banks* is provided (list of BankDB objects, oldest→newest),
+    evolution bullets are added showing trends across periods.
     """
     name = getattr(bank, 'bank_name', 'The bank')
     year = getattr(bank, 'fiscal_year', 'the period')
     ccy = getattr(bank, 'currency', None) or 'XOF'
+
+    # Evolution helpers — only when we have multiple periods
+    has_evo = all_banks is not None and len(all_banks) > 1
+    first_bank = all_banks[0] if has_evo else None
+    first_yr = getattr(first_bank, 'fiscal_year', '?') if first_bank else '?'
+    last_yr = year
+    n_years = len(all_banks) - 1 if has_evo else 0
 
     paragraphs = {}
 
@@ -497,6 +540,24 @@ def generate_analysis_paragraphs(bank, ratings):
         c_bullets.append(b)
     if car is not None:
         c_bullets.append(f"The bank-reported Capital Adequacy Ratio (CAR) is {car:.1f}%.")
+    # Evolution: Equity/Assets trend
+    if has_evo:
+        first_ea = getattr(first_bank, 'equity_assets', None)
+        if first_ea is not None and eq_a is not None:
+            trend = _ratio_trend(first_ea, eq_a, higher_is_better=True)
+            c_bullets.append(
+                f"Over the review period, the equity-to-assets ratio {trend} from "
+                f"{_pct(first_ea)} ({first_yr}) to {_pct(eq_a)} ({last_yr})."
+            )
+        # Total equity CAGR
+        first_te = getattr(first_bank, 'total_equity', None)
+        if first_te is not None and te is not None:
+            cagr = _cagr(first_te, te, n_years)
+            if cagr is not None:
+                c_bullets.append(
+                    f"Shareholders' equity grew from {ccy} {_fmt_abs(first_te)} to "
+                    f"{ccy} {_fmt_abs(te)}, a CAGR of {_pct(cagr)}."
+                )
     if not c_bullets:
         c_bullets.append("Insufficient data to assess capital adequacy for this period.")
     paragraphs["capital"] = c_bullets
@@ -529,6 +590,20 @@ def generate_analysis_paragraphs(bank, ratings):
         a_bullets.append(b)
     if cor is not None:
         a_bullets.append(f"Cost of risk relative to average assets is {_pct(cor)}.")
+    # Evolution: NPL ratio + coverage trend
+    if has_evo:
+        first_npl = getattr(first_bank, 'npl_ratio', None)
+        if first_npl is not None and npl is not None:
+            trend = _ratio_trend(first_npl, npl, higher_is_better=False)
+            a_bullets.append(
+                f"The NPL ratio {trend} from {_pct(first_npl)} ({first_yr}) to {_pct(npl)} ({last_yr})."
+            )
+        first_cov = getattr(first_bank, 'coverage_ratio', None)
+        if first_cov is not None and cov is not None:
+            trend = _ratio_trend(first_cov, cov, higher_is_better=True)
+            a_bullets.append(
+                f"The coverage ratio {trend} from {_pct(first_cov)} ({first_yr}) to {_pct(cov)} ({last_yr})."
+            )
     if not a_bullets:
         a_bullets.append("Insufficient data to assess asset quality for this period.")
     paragraphs["asset_quality"] = a_bullets
@@ -553,6 +628,14 @@ def generate_analysis_paragraphs(bank, ratings):
         m_bullets.append(b)
     else:
         m_bullets.append("Cost-to-Income data was not available; management efficiency could not be assessed.")
+    # Evolution: Cost-to-Income trend
+    if has_evo:
+        first_cti = getattr(first_bank, 'cost_to_income', None)
+        if first_cti is not None and cti is not None:
+            trend = _ratio_trend(first_cti, cti, higher_is_better=False)
+            m_bullets.append(
+                f"The cost-to-income ratio {trend} from {_pct(first_cti)} ({first_yr}) to {_pct(cti)} ({last_yr})."
+            )
     paragraphs["management"] = m_bullets
     bank.analysis_management = "\n".join(m_bullets)
 
@@ -593,6 +676,27 @@ def generate_analysis_paragraphs(bank, ratings):
         e_bullets.append(b)
     if opex_a is not None:
         e_bullets.append(f"Operating expenses absorb {_pct(opex_a)} of average assets.")
+    # Evolution: ROAE + ROAA trend
+    if has_evo:
+        first_roae = getattr(first_bank, 'roae', None)
+        first_roaa = getattr(first_bank, 'roaa', None)
+        evo_parts = []
+        if first_roae is not None and roae is not None:
+            trend = _ratio_trend(first_roae, roae, higher_is_better=True)
+            evo_parts.append(f"ROAE {trend} from {_pct(first_roae)} to {_pct(roae)}")
+        if first_roaa is not None and roaa is not None:
+            trend = _ratio_trend(first_roaa, roaa, higher_is_better=True)
+            evo_parts.append(f"ROAA {trend} from {_pct(first_roaa)} to {_pct(roaa)}")
+        if evo_parts:
+            e_bullets.append(
+                f"Over the review period ({first_yr}–{last_yr}), {' and '.join(evo_parts)}."
+            )
+        # Net income CAGR
+        first_ni = getattr(first_bank, 'net_income', None)
+        if first_ni is not None and ni is not None and first_ni > 0 and ni > 0:
+            cagr = _cagr(first_ni, ni, n_years)
+            if cagr is not None:
+                e_bullets.append(f"Net income grew at a CAGR of {_pct(cagr)} over the period.")
     if not e_bullets:
         e_bullets.append("Insufficient data to assess earnings for this period.")
     paragraphs["earnings"] = e_bullets
@@ -624,6 +728,22 @@ def generate_analysis_paragraphs(bank, ratings):
         else:
             b += ". The bank has ample deposit funding relative to its loan book."
         l_bullets.append(b)
+    # Evolution: Liquidity ratio trend
+    if has_evo:
+        first_la = getattr(first_bank, 'liquid_assets_total_assets', None)
+        if first_la is not None and la_ta is not None:
+            trend = _ratio_trend(first_la, la_ta, higher_is_better=True)
+            l_bullets.append(
+                f"The liquid-assets-to-total-assets ratio {trend} from "
+                f"{_pct(first_la)} ({first_yr}) to {_pct(la_ta)} ({last_yr})."
+            )
+        first_ld = getattr(first_bank, 'gross_loans_deposits', None)
+        if first_ld is not None and ld is not None:
+            trend = _ratio_trend(first_ld, ld, higher_is_better=False)
+            l_bullets.append(
+                f"The loans-to-deposits ratio {trend} from "
+                f"{_pct(first_ld)} ({first_yr}) to {_pct(ld)} ({last_yr})."
+            )
     if not l_bullets:
         l_bullets.append("Insufficient data to assess liquidity for this period.")
     paragraphs["liquidity"] = l_bullets
@@ -645,6 +765,32 @@ def generate_analysis_paragraphs(bank, ratings):
     else:
         b += "insufficient data was available to draw a definitive conclusion."
     c_bullets_comp.append(b)
+    # Evolution: key aggregates summary
+    if has_evo:
+        first_ta = getattr(first_bank, 'total_assets', None)
+        if first_ta is not None and ta is not None:
+            cagr = _cagr(first_ta, ta, n_years)
+            if cagr is not None:
+                c_bullets_comp.append(
+                    f"Total assets grew from {ccy} {_fmt_abs(first_ta)} ({first_yr}) to "
+                    f"{ccy} {_fmt_abs(ta)} ({last_yr}), a CAGR of {_pct(cagr)}."
+                )
+        first_gl = getattr(first_bank, 'gross_loans', None)
+        if first_gl is not None and gl is not None:
+            cagr = _cagr(first_gl, gl, n_years)
+            if cagr is not None:
+                c_bullets_comp.append(
+                    f"The gross loan book expanded from {ccy} {_fmt_abs(first_gl)} to "
+                    f"{ccy} {_fmt_abs(gl)}, a CAGR of {_pct(cagr)}."
+                )
+        first_deps = getattr(first_bank, 'deposits', None)
+        if first_deps is not None and deps is not None:
+            cagr = _cagr(first_deps, deps, n_years)
+            if cagr is not None:
+                c_bullets_comp.append(
+                    f"Customer deposits grew from {ccy} {_fmt_abs(first_deps)} to "
+                    f"{ccy} {_fmt_abs(deps)}, a CAGR of {_pct(cagr)}."
+                )
     paragraphs["composite"] = c_bullets_comp
     bank.analysis_composite = "\n".join(c_bullets_comp)
 

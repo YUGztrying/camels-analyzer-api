@@ -645,3 +645,59 @@ class TestGenerateAnalysisParagraphs:
         # Analysis now returns lists of bullets; bank name appears in composite
         composite_text = " ".join(paragraphs["composite"])
         assert "Banque Atlantique" in composite_text
+
+    def test_evolution_bullets_added_with_all_banks(self):
+        """When all_banks is provided, evolution bullets reference trends."""
+        bank1 = _make_bank(fiscal_year="2021", total_assets=800_000, total_equity=90_000,
+                           gross_loans=500_000, deposits=600_000, net_income=8_000,
+                           npls_mn=25_000)
+        bank1 = calculate_all_ratios(bank1)
+
+        bank2 = _make_bank(fiscal_year="2023", total_assets=1_000_000, total_equity=120_000,
+                           gross_loans=600_000, deposits=700_000, net_income=10_000,
+                           npls_mn=20_000)
+        bank2 = calculate_all_ratios(bank2, prev_bank=bank1)
+
+        ratings = {
+            "capital": rate_capital(bank2),
+            "asset_quality": rate_asset_quality(bank2),
+            "management": rate_management(bank2),
+            "earnings": rate_earnings(bank2),
+            "liquidity": rate_liquidity(bank2),
+        }
+        ratings["composite"] = get_composite_rating(
+            ratings["capital"], ratings["asset_quality"],
+            ratings["management"], ratings["earnings"], ratings["liquidity"]
+        )
+        paragraphs = generate_analysis_paragraphs(bank2, ratings, all_banks=[bank1, bank2])
+
+        # Check that evolution bullets were added
+        capital_text = " ".join(paragraphs["capital"])
+        assert "2021" in capital_text
+        assert "2023" in capital_text
+
+        asset_text = " ".join(paragraphs["asset_quality"])
+        assert "NPL ratio" in asset_text and "2021" in asset_text
+
+        composite_text = " ".join(paragraphs["composite"])
+        assert "CAGR" in composite_text
+
+    def test_no_evolution_without_all_banks(self):
+        """Without all_banks, no evolution bullets are generated."""
+        bank = _make_bank()
+        bank = calculate_all_ratios(bank)
+        ratings = {
+            "capital": rate_capital(bank),
+            "asset_quality": rate_asset_quality(bank),
+            "management": rate_management(bank),
+            "earnings": rate_earnings(bank),
+            "liquidity": rate_liquidity(bank),
+        }
+        ratings["composite"] = get_composite_rating(
+            ratings["capital"], ratings["asset_quality"],
+            ratings["management"], ratings["earnings"], ratings["liquidity"]
+        )
+        paragraphs = generate_analysis_paragraphs(bank, ratings)
+        # No CAGR bullet should appear
+        composite_text = " ".join(paragraphs["composite"])
+        assert "CAGR" not in composite_text

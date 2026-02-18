@@ -6,9 +6,10 @@ import { fmtPct, fmtNum } from './utils/formatters';
 import ErrorBoundary from './components/ErrorBoundary';
 import FileUpload from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
+import InputModal from './components/InputModal';
 
 function App() {
-  const { file, loading, progress, result, error, handleFileChange, handleUpload } = useAnalyzer();
+  const { file, loading, progress, result, pendingResult, error, handleFileChange, handleUpload, confirmResult } = useAnalyzer();
   // overrides[periodIndex][fieldKey] = user-entered value (decimal for ratios)
   const [overrides, setOverrides] = useState({});
 
@@ -60,6 +61,19 @@ function App() {
     return p?.key_metrics?.[key];
   };
 
+  // Modal: periods from pending result (before confirmation)
+  const pendingPeriods = pendingResult?.all_periods || (pendingResult ? [pendingResult] : []);
+
+  const handleModalConfirm = (modalOverrides) => {
+    setOverrides(modalOverrides);
+    confirmResult();
+  };
+
+  const handleModalSkip = () => {
+    setOverrides({});
+    confirmResult();
+  };
+
   return (
     <ErrorBoundary>
       <div className="App">
@@ -70,6 +84,14 @@ function App() {
 
         {loading && <LoadingSpinner progress={progress} />}
         {error && <div className="error">{error}</div>}
+
+        {pendingResult && (
+          <InputModal
+            periods={pendingPeriods}
+            onConfirm={handleModalConfirm}
+            onSkip={handleModalSkip}
+          />
+        )}
 
         {result && periods.length > 0 && (
           <div className="result">
