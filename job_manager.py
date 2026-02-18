@@ -275,6 +275,11 @@ def _process_irp_job(job_id: str, file_path: str) -> dict:
             db.refresh(latest_bank)
             saved_banks[-1] = (latest_bank, latest_ratings, latest_paragraphs, latest_data)
 
+        # Refresh ALL banks — intermediate commits expire earlier banks'
+        # attributes, and __dict__ iteration doesn't trigger lazy loading.
+        for bank, _, _, _ in saved_banks:
+            db.refresh(bank)
+
         # Build per-period summary list (oldest→newest)
         all_periods = []
         for bank, ratings, paragraphs, pdata in saved_banks:
