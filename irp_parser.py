@@ -252,14 +252,17 @@ def parse_irp_excel(file_path: str) -> list[dict]:
     fiscal_years = [str(d.year) if d else "N/A" for d in period_dates]
     logger.info("IRP parser: periods=%s", period_labels)
 
-    # ── Build merged field maps ────────────────────────────────────────────
-    assets_map = dict(_ASSETS_MFI)
-    liab_map = dict(_LIABILITIES_MFI)
-    income_map = dict(_INCOME_MFI)
+    # ── Build merged field maps (case-insensitive: keys lowered) ─────────
+    def _lower_map(m: dict) -> dict:
+        return {k.lower(): v for k, v in m.items()}
+
+    assets_map = _lower_map(_ASSETS_MFI)
+    liab_map = _lower_map(_LIABILITIES_MFI)
+    income_map = _lower_map(_INCOME_MFI)
     if is_bank:
-        assets_map.update(_ASSETS_BANK_EXTRA)
-        liab_map.update(_LIABILITIES_BANK_EXTRA)
-        income_map.update(_INCOME_BANK_EXTRA)
+        assets_map.update(_lower_map(_ASSETS_BANK_EXTRA))
+        liab_map.update(_lower_map(_LIABILITIES_BANK_EXTRA))
+        income_map.update(_lower_map(_INCOME_BANK_EXTRA))
 
     # ── Scan rows ──────────────────────────────────────────────────────────
     SECTION_ASSETS = "assets"
@@ -309,10 +312,10 @@ def parse_irp_excel(file_path: str) -> list[dict]:
         else:
             field_map = income_map
 
-        if col_a not in field_map:
+        if col_a_lower not in field_map:
             continue
 
-        db_field = field_map[col_a]
+        db_field = field_map[col_a_lower]
         if db_field is None:
             continue  # explicitly skipped
 

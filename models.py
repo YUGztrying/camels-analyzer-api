@@ -15,7 +15,7 @@ class BankDB(Base):
 
     # === GENERAL INFO ===
     bank_name = Column(String, nullable=False, index=True)
-    country = Column(String, nullable=False)
+    country = Column(String, nullable=True)
     fiscal_year = Column(String, default="N/A")
     period_end_date = Column(DateTime)
     currency = Column(String, default="XOF")

@@ -40,6 +40,18 @@ def _run_migrations(engine):
                 logger.warning(f"Migration skipped for {col_name}: {e}")
                 conn.rollback()
 
+        # Relax NOT NULL on columns that IRP files don't always provide
+        for col_name in ["country"]:
+            try:
+                conn.execute(text(
+                    f"ALTER TABLE banks ALTER COLUMN {col_name} DROP NOT NULL"
+                ))
+                conn.commit()
+                logger.info(f"Migration: relaxed NOT NULL on banks.{col_name}.")
+            except Exception as e:
+                logger.warning(f"Migration skipped for {col_name} nullable: {e}")
+                conn.rollback()
+
 
 def init_database():
     """Create database tables with retry logic for container startup."""
