@@ -453,151 +453,199 @@ def get_composite_rating(capital, asset, management, earnings, liquidity):
 # Paragraph analysis generation
 # ---------------------------------------------------------------------------
 
+def _fmt_abs(value):
+    """Format an absolute number with thousand separators, or 'N/A'."""
+    if value is None:
+        return "N/A"
+    return f"{abs(value):,.0f}"
+
+
 def generate_analysis_paragraphs(bank, ratings):
     """
-    Generate a short analyst-style paragraph for each CAMELS component
-    and a composite summary.  Writes directly onto *bank* object and
-    returns a dict of the paragraphs.
+    Generate bullet-point analyst-style analysis for each CAMELS component.
+    Returns a dict mapping component keys to *lists* of bullet strings.
+    Also stores a joined text version on the bank object for DB persistence.
     """
     name = getattr(bank, 'bank_name', 'The bank')
     year = getattr(bank, 'fiscal_year', 'the period')
+    ccy = getattr(bank, 'currency', None) or 'XOF'
 
     paragraphs = {}
 
     # --- C: Capital Adequacy ---
-    c = ratings.get("capital", {})
+    c_bullets = []
     eq_a = getattr(bank, 'equity_assets', None)
     d_a = getattr(bank, 'debt_assets', None)
-    c_text = f"Capital Adequacy — Rating: {c.get('rating', 'N/A')} ({c.get('status', 'N/A')}). "
+    te = getattr(bank, 'total_equity', None)
+    ta = getattr(bank, 'total_assets', None)
+    car = getattr(bank, 'car_regulatory', None)
+
     if eq_a is not None:
-        c_text += f"{name} reports an Equity-to-Assets ratio of {_pct(eq_a)}, "
+        b = f"The Equity-to-Assets ratio stands at {_pct(eq_a)}"
+        if te is not None:
+            b += f" ({ccy} {_fmt_abs(te)} in equity on {ccy} {_fmt_abs(ta)} total assets)"
         if eq_a >= 0.10:
-            c_text += "indicating a well-capitalized position that provides a comfortable buffer to absorb potential losses. "
+            b += ", indicating a well-capitalized position that provides a comfortable buffer to absorb potential losses."
         elif eq_a >= 0.06:
-            c_text += "suggesting an adequate capital base, though limited headroom exists to absorb unexpected shocks. "
+            b += ", suggesting an adequate capital base, though limited headroom exists to absorb unexpected shocks."
         else:
-            c_text += "which signals thin capitalization and vulnerability to asset-quality deterioration. "
+            b += ", which signals thin capitalization and vulnerability to asset-quality deterioration."
+        c_bullets.append(b)
     if d_a is not None:
-        c_text += f"The Debt-to-Assets ratio stands at {_pct(d_a)}, "
-        if d_a <= 0.30:
-            c_text += "reflecting moderate leverage."
-        else:
-            c_text += "indicating relatively high leverage that warrants monitoring."
-    else:
-        c_text += "Debt-to-Assets data was not available for this period."
-    paragraphs["capital"] = c_text
-    bank.analysis_capital = c_text
+        b = f"The Debt-to-Assets ratio stands at {_pct(d_a)}, "
+        b += "reflecting moderate leverage." if d_a <= 0.30 else "indicating relatively high leverage that warrants monitoring."
+        c_bullets.append(b)
+    if car is not None:
+        c_bullets.append(f"The bank-reported Capital Adequacy Ratio (CAR) is {car:.1f}%.")
+    if not c_bullets:
+        c_bullets.append("Insufficient data to assess capital adequacy for this period.")
+    paragraphs["capital"] = c_bullets
+    bank.analysis_capital = "\n".join(c_bullets)
 
     # --- A: Asset Quality ---
-    a = ratings.get("asset_quality", {})
+    a_bullets = []
     npl = getattr(bank, 'npl_ratio', None)
     cov = getattr(bank, 'coverage_ratio', None)
     cor = getattr(bank, 'cost_of_risk_avg_assets', None)
-    a_text = f"Asset Quality — Rating: {a.get('rating', 'N/A')} ({a.get('status', 'N/A')}). "
+    gl = getattr(bank, 'gross_loans', None)
+
     if npl is not None:
-        a_text += f"The NPL ratio is {_pct(npl)}, "
+        b = f"The NPL ratio is {_pct(npl)}"
+        if gl is not None:
+            b += f" (on a gross loan book of {ccy} {_fmt_abs(gl)})"
         if npl < 0.05:
-            a_text += "demonstrating strong credit discipline and healthy loan book quality. "
+            b += ", demonstrating strong credit discipline and healthy loan book quality."
         elif npl < 0.10:
-            a_text += "which is within acceptable bounds but warrants closer monitoring of specific sector exposures. "
+            b += ", within acceptable bounds but warranting closer monitoring of sector exposures."
         else:
-            a_text += "which is elevated and suggests material credit risk that requires remedial action. "
+            b += ", which is elevated and suggests material credit risk requiring remedial action."
+        a_bullets.append(b)
     if cov is not None:
-        a_text += f"The coverage ratio is {_pct(cov)}, "
+        b = f"The coverage ratio is {_pct(cov)}, "
         if cov >= 1.0:
-            a_text += "meaning provisions fully cover non-performing exposures. "
+            b += "meaning provisions fully cover non-performing exposures."
         else:
-            a_text += f"leaving {_pct(1 - cov) if cov < 1 else 'N/A'} of NPLs uncovered by provisions. "
+            b += f"leaving {_pct(1 - cov)} of NPLs uncovered by provisions."
+        a_bullets.append(b)
     if cor is not None:
-        a_text += f"Cost of risk relative to average assets is {_pct(cor)}."
-    paragraphs["asset_quality"] = a_text
-    bank.analysis_asset_quality = a_text
+        a_bullets.append(f"Cost of risk relative to average assets is {_pct(cor)}.")
+    if not a_bullets:
+        a_bullets.append("Insufficient data to assess asset quality for this period.")
+    paragraphs["asset_quality"] = a_bullets
+    bank.analysis_asset_quality = "\n".join(a_bullets)
 
     # --- M: Management ---
-    m = ratings.get("management", {})
+    m_bullets = []
     cti = getattr(bank, 'cost_to_income', None)
-    m_text = f"Management (Efficiency) — Rating: {m.get('rating', 'N/A')} ({m.get('status', 'N/A')}). "
+    opex = getattr(bank, 'operating_expenses', None)
+    oi = getattr(bank, 'operating_income', None)
+
     if cti is not None:
-        m_text += f"The Cost-to-Income ratio is {_pct(cti)}, "
+        b = f"The Cost-to-Income ratio is {_pct(cti)}"
+        if opex is not None and oi is not None:
+            b += f" ({ccy} {_fmt_abs(opex)} expenses on {ccy} {_fmt_abs(oi)} operating income)"
         if cti < 0.50:
-            m_text += "reflecting strong operational efficiency — the bank converts a high share of income into profit. "
+            b += ", reflecting strong operational efficiency — the bank converts a high share of income into profit."
         elif cti < 0.70:
-            m_text += "indicating moderate efficiency. There may be room to optimize operating costs relative to revenue generation. "
+            b += ", indicating moderate efficiency. There may be room to optimize operating costs relative to revenue."
         else:
-            m_text += "highlighting operational inefficiency. A significant portion of income is consumed by costs, limiting profitability. "
+            b += ", highlighting operational inefficiency. A significant portion of income is consumed by costs."
+        m_bullets.append(b)
     else:
-        m_text += "Cost-to-Income data was not available; management efficiency could not be assessed quantitatively."
-    paragraphs["management"] = m_text
-    bank.analysis_management = m_text
+        m_bullets.append("Cost-to-Income data was not available; management efficiency could not be assessed.")
+    paragraphs["management"] = m_bullets
+    bank.analysis_management = "\n".join(m_bullets)
 
     # --- E: Earnings ---
-    e = ratings.get("earnings", {})
+    e_bullets = []
     roaa = getattr(bank, 'roaa', None)
     roae = getattr(bank, 'roae', None)
     nii_a = getattr(bank, 'net_interest_income_avg_assets', None)
     nonii_a = getattr(bank, 'non_interest_income_avg_assets', None)
     opex_a = getattr(bank, 'opex_avg_assets', None)
-    tax_a = getattr(bank, 'tax_expenses_avg_assets', None)
-    e_text = f"Earnings — Rating: {e.get('rating', 'N/A')} ({e.get('status', 'N/A')}). "
-    if roaa is not None:
-        e_text += f"ROAA stands at {_pct(roaa)} "
-    if roae is not None:
-        e_text += f"and ROAE at {_pct(roae)}, "
-        if roae >= 0.15:
-            e_text += "demonstrating strong profitability and efficient use of shareholders' capital. "
-        elif roae >= 0.05:
-            e_text += "suggesting adequate earnings generation, with potential for improvement. "
+    ni = getattr(bank, 'net_income', None)
+
+    if roaa is not None or roae is not None:
+        parts = []
+        if roaa is not None:
+            parts.append(f"ROAA of {_pct(roaa)}")
+        if roae is not None:
+            parts.append(f"ROAE of {_pct(roae)}")
+        b = f"Profitability metrics show {' and '.join(parts)}"
+        if ni is not None:
+            b += f" (net income of {ccy} {_fmt_abs(ni)})"
+        if roae is not None and roae >= 0.15:
+            b += ", demonstrating strong profitability and efficient use of shareholders' capital."
+        elif roae is not None and roae >= 0.05:
+            b += ", suggesting adequate earnings generation with potential for improvement."
+        elif roae is not None:
+            b += ", indicating weak profitability that may erode capital over time."
         else:
-            e_text += "indicating weak profitability that may erode capital over time. "
+            b += "."
+        e_bullets.append(b)
     if nii_a is not None:
-        e_text += f"Net interest income represents {_pct(nii_a)} of average assets. "
-    if nonii_a is not None:
-        e_text += f"Non-interest income contributes {_pct(nonii_a)} of average assets, "
-        if nonii_a and nonii_a > 0.02:
-            e_text += "showing meaningful revenue diversification. "
+        b = f"Net interest income represents {_pct(nii_a)} of average assets"
+        if nonii_a is not None:
+            b += f", while non-interest income contributes {_pct(nonii_a)}"
+            b += " — showing meaningful revenue diversification." if (nonii_a and nonii_a > 0.02) else " — suggesting limited diversification beyond traditional lending."
         else:
-            e_text += "suggesting limited diversification beyond traditional lending. "
+            b += "."
+        e_bullets.append(b)
     if opex_a is not None:
-        e_text += f"Operating expenses absorb {_pct(opex_a)} of average assets. "
-    if tax_a is not None:
-        e_text += f"Tax expense accounts for {_pct(tax_a)} of average assets."
-    paragraphs["earnings"] = e_text
-    bank.analysis_earnings = e_text
+        e_bullets.append(f"Operating expenses absorb {_pct(opex_a)} of average assets.")
+    if not e_bullets:
+        e_bullets.append("Insufficient data to assess earnings for this period.")
+    paragraphs["earnings"] = e_bullets
+    bank.analysis_earnings = "\n".join(e_bullets)
 
     # --- L: Liquidity ---
-    l = ratings.get("liquidity", {})
+    l_bullets = []
     la_ta = getattr(bank, 'liquid_assets_total_assets', None)
-    l_text = f"Liquidity — Rating: {l.get('rating', 'N/A')} ({l.get('status', 'N/A')}). "
-    if la_ta is not None:
-        l_text += f"Liquid assets (cash, deposits with banks, and investment securities) represent {_pct(la_ta)} of total assets. "
-        if la_ta >= 0.30:
-            l_text += "This comfortable buffer ensures the bank can meet short-term obligations and withstand deposit volatility. "
-        elif la_ta >= 0.15:
-            l_text += "This is an adequate level, though a sudden deposit outflow or market stress event could tighten the position. "
-        else:
-            l_text += "This low level raises concerns about the bank's ability to handle stress scenarios or sudden liquidity demands. "
     ld = getattr(bank, 'gross_loans_deposits', None)
+    deps = getattr(bank, 'deposits', None)
+
+    if la_ta is not None:
+        b = f"Liquid assets (cash, bank deposits, and investment securities) represent {_pct(la_ta)} of total assets. "
+        if la_ta >= 0.30:
+            b += "This comfortable buffer ensures the bank can meet short-term obligations and withstand deposit volatility."
+        elif la_ta >= 0.15:
+            b += "This is an adequate level, though a sudden deposit outflow could tighten the position."
+        else:
+            b += "This low level raises concerns about the bank's ability to handle stress scenarios."
+        l_bullets.append(b)
     if ld is not None:
-        l_text += f"The Loans-to-Deposits ratio is {_pct(ld)}."
-    paragraphs["liquidity"] = l_text
-    bank.analysis_liquidity = l_text
+        b = f"The Loans-to-Deposits ratio is {_pct(ld)}"
+        if deps is not None:
+            b += f" (deposits of {ccy} {_fmt_abs(deps)})"
+        if ld > 0.90:
+            b += ". This high ratio suggests aggressive lending relative to the deposit base, increasing liquidity risk."
+        elif ld > 0.75:
+            b += ". The bank maintains a reasonable balance between lending and deposit funding."
+        else:
+            b += ". The bank has ample deposit funding relative to its loan book."
+        l_bullets.append(b)
+    if not l_bullets:
+        l_bullets.append("Insufficient data to assess liquidity for this period.")
+    paragraphs["liquidity"] = l_bullets
+    bank.analysis_liquidity = "\n".join(l_bullets)
 
     # --- Composite ---
     comp = ratings.get("composite", {})
     comp_r = comp.get("composite_rating")
-    comp_text = f"Composite CAMELS Rating: {comp_r} ({comp.get('status', 'N/A')}). "
-    comp_text += f"Based on the analysis of {name} for fiscal year {year}, "
+    c_bullets_comp = []
+    b = f"Based on the analysis of {name} for fiscal year {year}, "
     if comp_r and comp_r <= 2:
-        comp_text += "the bank exhibits a fundamentally sound financial condition across the key pillars. Continued vigilance is recommended to maintain this strong position."
+        b += "the bank exhibits a fundamentally sound financial condition across the key pillars. Continued vigilance is recommended to maintain this strong position."
     elif comp_r and comp_r <= 3:
-        comp_text += "the bank demonstrates an acceptable financial condition overall, but some areas require management attention and corrective measures to prevent further deterioration."
+        b += "the bank demonstrates an acceptable financial condition overall, but some areas require management attention to prevent further deterioration."
     elif comp_r and comp_r <= 4:
-        comp_text += "the bank displays material weaknesses in several areas that, if left unaddressed, could impair its financial viability. Prompt corrective action is needed."
+        b += "the bank displays material weaknesses in several areas that, if left unaddressed, could impair its financial viability."
     elif comp_r and comp_r == 5:
-        comp_text += "the bank is in a critically weak condition with an imminent risk of failure. Immediate and decisive supervisory intervention is warranted."
+        b += "the bank is in a critically weak condition. Immediate supervisory intervention is warranted."
     else:
-        comp_text += "insufficient data was available to draw a definitive conclusion. Additional financial disclosures are needed."
-    paragraphs["composite"] = comp_text
-    bank.analysis_composite = comp_text
+        b += "insufficient data was available to draw a definitive conclusion."
+    c_bullets_comp.append(b)
+    paragraphs["composite"] = c_bullets_comp
+    bank.analysis_composite = "\n".join(c_bullets_comp)
 
     return paragraphs

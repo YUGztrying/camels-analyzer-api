@@ -19,12 +19,7 @@ function App() {
         <h1>CAMELS Analyzer</h1>
         <p className="subtitle">Automated bank financial statement analysis</p>
 
-        <FileUpload
-          onFileChange={handleFileChange}
-          onUpload={handleUpload}
-          loading={loading}
-          file={file}
-        />
+        <FileUpload onFileChange={handleFileChange} onUpload={handleUpload} loading={loading} file={file} />
 
         {loading && <LoadingSpinner progress={progress} />}
         {error && <div className="error">{error}</div>}
@@ -51,15 +46,13 @@ function App() {
               </button>
             </div>
 
-            {/* CAMELS Ratings */}
+            {/* ── CAMELS Ratings ── */}
             <SectionBlock title="CAMELS Ratings" cls="ratings-section-header">
               <table className="evo-table">
-                <thead>
-                  <tr>
-                    <th>Component</th>
-                    {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
-                  </tr>
-                </thead>
+                <thead><tr>
+                  <th>Component</th>
+                  {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+                </tr></thead>
                 <tbody>
                   <RatingRow label="Composite" periods={periods} path="composite" composite />
                   <RatingRow label="C - Capital" periods={periods} path="capital" />
@@ -71,96 +64,92 @@ function App() {
               </table>
             </SectionBlock>
 
-            {/* C - Capital */}
-            <SectionBlock title="C — Capital Adequacy" cls="capital-header">
-              <RatioTable periods={periods} rows={[
-                { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
-                { label: 'Debt / Assets', key: 'debt_assets', src: 'km' },
+            {/* ── Balance Sheet ── */}
+            <SectionBlock title="Balance Sheet" cls="financials-header">
+              <FinancialTable periods={periods} rows={[
+                { label: 'Total Assets', key: 'total_assets', bold: true },
+                { label: 'Total Liabilities', key: 'total_liabilities', bold: true },
+                { label: "Shareholder's Equity", key: 'total_equity', bold: true },
+                { label: 'Cash & Cash Equivalent', key: 'cash_reserves_requirements' },
+                { label: 'Investment Securities', key: 'investment_securities' },
+                { label: 'Gross Loans', key: 'gross_loans' },
+                { label: 'Loan Loss Provisions', key: 'loan_loss_provisions', neg: true },
+                { label: 'Customer Deposits', key: 'deposits' },
+                { label: 'Borrowings', key: 'short_term_borrowings' },
+                { label: 'Long-Term Debt', key: 'long_term_debt' },
               ]} />
             </SectionBlock>
 
-            {/* A - Asset Quality */}
-            <SectionBlock title="A — Asset Quality" cls="asset-header">
+            {/* ── Income Statement ── */}
+            <SectionBlock title="Income Statement" cls="financials-header">
+              <FinancialTable periods={periods} rows={[
+                { label: 'Net Interest Income', key: 'net_interest_income' },
+                { label: 'Non-Interest Income', computed: (b) => {
+                  const oi = b?.operating_income;
+                  const nii = b?.net_interest_income;
+                  return (oi != null && nii != null) ? oi - nii : null;
+                }},
+                { label: 'Operating Expenses', key: 'operating_expenses', neg: true },
+                { label: 'Cost of Risk', key: 'provision_expenses', neg: true },
+                { label: 'Net Profit', key: 'net_income', bold: true },
+              ]} />
+            </SectionBlock>
+
+            {/* ── Growth ── */}
+            {periods.length > 1 && (
+              <SectionBlock title="Growth" cls="financials-header">
+                <GrowthTable periods={periods} rows={[
+                  { label: 'Assets Growth', key: 'total_assets' },
+                  { label: 'Gross Loans', key: 'gross_loans' },
+                  { label: 'Deposits', key: 'deposits' },
+                  { label: "Shareholders' Equity", key: 'total_equity' },
+                ]} />
+              </SectionBlock>
+            )}
+
+            {/* ── Solvency Ratios ── */}
+            <SectionBlock title="Solvency Ratios" cls="capital-header">
+              <RatioTable periods={periods} rows={[
+                { label: 'CAR - Regulatory', key: 'car', src: 'km' },
+                { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
+              ]} />
+            </SectionBlock>
+
+            {/* ── Asset Quality ── */}
+            <SectionBlock title="Asset Quality" cls="asset-header">
               <RatioTable periods={periods} rows={[
                 { label: 'NPL Ratio', key: 'npl_ratio', src: 'km' },
                 { label: 'Coverage Ratio', key: 'coverage_ratio', src: 'km' },
-                { label: 'Cost of Risk / Avg Assets', key: 'cost_of_risk_avg_assets', src: 'km' },
               ]} />
             </SectionBlock>
 
-            {/* M - Management */}
-            <SectionBlock title="M — Management (Efficiency)" cls="management-header">
-              <RatioTable periods={periods} rows={[
-                { label: 'Cost-to-Income', key: 'cost_to_income', src: 'km' },
-              ]} />
-            </SectionBlock>
-
-            {/* E - Earnings */}
-            <SectionBlock title="E — Earnings" cls="earnings-header">
+            {/* ── Profitability ── */}
+            <SectionBlock title="Profitability" cls="earnings-header">
               <RatioTable periods={periods} rows={[
                 { label: 'ROAA', key: 'roaa', src: 'km' },
                 { label: 'ROAE', key: 'roae', src: 'km' },
-                { label: 'NII / Avg Assets', key: 'net_interest_income_avg_assets', src: 'bank' },
-                { label: 'Non-Interest Inc / Avg Assets', key: 'non_interest_income_avg_assets', src: 'bank' },
-                { label: 'OpEx / Avg Assets', key: 'opex_avg_assets', src: 'bank' },
-                { label: 'Tax / Avg Assets', key: 'tax_expenses_avg_assets', src: 'bank' },
+                { label: 'Cost to Income Ratio', key: 'cost_to_income', src: 'km' },
               ]} />
             </SectionBlock>
 
-            {/* L - Liquidity */}
-            <SectionBlock title="L — Liquidity" cls="liquidity-header">
+            {/* ── Liquidity ── */}
+            <SectionBlock title="Liquidity" cls="liquidity-header">
               <RatioTable periods={periods} rows={[
-                { label: 'Liquid Assets / Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
-                { label: 'Gross Loans / Deposits', key: 'loans_deposits', src: 'km' },
+                { label: 'Loans/Deposits', key: 'loans_deposits', src: 'km' },
+                { label: 'Liquid Assets/Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
               ]} />
             </SectionBlock>
 
-            {/* Key Financials */}
-            <SectionBlock title="Key Financials" cls="financials-header">
-              <table className="evo-table">
-                <thead>
-                  <tr>
-                    <th>Item</th>
-                    {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    ['Total Assets', 'total_assets'],
-                    ['Gross Loans', 'gross_loans'],
-                    ['Total Deposits', 'deposits'],
-                    ['Total Equity', 'total_equity'],
-                    ['Interest Income', 'interest_income'],
-                    ['Interest Expenses', 'interest_expenses'],
-                    ['Net Interest Income', 'net_interest_income'],
-                    ['Operating Income (PNB)', 'operating_income'],
-                    ['Operating Expenses', 'operating_expenses'],
-                    ['Provision Expenses', 'provision_expenses'],
-                    ['Net Income', 'net_income'],
-                  ].map(([label, key]) => (
-                    <tr key={key}>
-                      <td className="row-label">{label}</td>
-                      {periods.map((p, i) => (
-                        <td key={i} className="pc num-cell">{fmtNum(p.bank?.[key])}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </SectionBlock>
-
-            {/* Analysis - latest period */}
+            {/* ── Analysis ── */}
             {analysis && (
               <div className="analysis-section">
-                <h3>Analysis — {latest.period_label || latest.bank?.fiscal_year}</h3>
-                {['composite', 'capital', 'asset_quality', 'management', 'earnings', 'liquidity'].map(key => (
-                  analysis[key] ? (
-                    <div key={key} className="analysis-block">
-                      <h5>{key === 'asset_quality' ? 'Asset Quality' : key.charAt(0).toUpperCase() + key.slice(1)}</h5>
-                      <p>{analysis[key]}</p>
-                    </div>
-                  ) : null
-                ))}
+                <h3>Analysis</h3>
+                <AnalysisBlock title="Capitalization" section="capital" analysis={analysis} ratings={latest?.detailed_ratings} />
+                <AnalysisBlock title="Asset Quality" section="asset_quality" analysis={analysis} ratings={latest?.detailed_ratings} />
+                <AnalysisBlock title="Management & Efficiency" section="management" analysis={analysis} ratings={latest?.detailed_ratings} />
+                <AnalysisBlock title="Earnings & Profitability" section="earnings" analysis={analysis} ratings={latest?.detailed_ratings} />
+                <AnalysisBlock title="Liquidity & Funding" section="liquidity" analysis={analysis} ratings={latest?.detailed_ratings} />
+                <AnalysisBlock title="Composite Assessment" section="composite" analysis={analysis} ratings={{ composite: latest?.camels_rating }} isComposite />
               </div>
             )}
           </div>
@@ -202,15 +191,69 @@ function RatingRow({ label, periods, path, composite }) {
   );
 }
 
+function FinancialTable({ periods, rows }) {
+  return (
+    <table className="evo-table">
+      <thead><tr>
+        <th>Item</th>
+        {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+      </tr></thead>
+      <tbody>
+        {rows.map((r, ri) => (
+          <tr key={ri} className={r.bold ? 'bold-row' : ''}>
+            <td className="row-label">{r.label}</td>
+            {periods.map((p, pi) => {
+              const val = r.computed ? r.computed(p.bank) : p.bank?.[r.key];
+              let display;
+              if (val == null) {
+                display = '-';
+              } else if (r.neg) {
+                display = `(${Math.abs(val).toLocaleString()})`;
+              } else {
+                display = val.toLocaleString();
+              }
+              return <td key={pi} className="pc num-cell">{display}</td>;
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function GrowthTable({ periods, rows }) {
+  return (
+    <table className="evo-table">
+      <thead><tr>
+        <th>Metric</th>
+        {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+      </tr></thead>
+      <tbody>
+        {rows.map((r, ri) => (
+          <tr key={ri}>
+            <td className="row-label">{r.label}</td>
+            {periods.map((p, pi) => {
+              if (pi === 0) return <td key={pi} className="pc num-cell na">—</td>;
+              const prev = periods[pi - 1].bank?.[r.key];
+              const curr = p.bank?.[r.key];
+              const growth = (curr != null && prev != null && prev !== 0)
+                ? (curr - prev) / Math.abs(prev) : null;
+              return <td key={pi} className="pc num-cell">{growth != null ? fmtPct(growth) : 'N/A'}</td>;
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
 function RatioTable({ periods, rows }) {
   return (
     <table className="evo-table">
-      <thead>
-        <tr>
-          <th>Ratio</th>
-          {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
-        </tr>
-      </thead>
+      <thead><tr>
+        <th>Ratio</th>
+        {periods.map((p, i) => <th key={i} className="pc">{p.period_label || p.bank?.fiscal_year}</th>)}
+      </tr></thead>
       <tbody>
         {rows.map((r, ri) => (
           <tr key={ri}>
@@ -223,6 +266,30 @@ function RatioTable({ periods, rows }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function AnalysisBlock({ title, section, analysis, ratings, isComposite }) {
+  const data = analysis?.[section];
+  if (!data) return null;
+
+  const r = isComposite ? ratings?.composite : ratings?.[section];
+  const rating = r?.rating ?? r?.composite_rating;
+  const status = r?.status;
+
+  // Handle both old format (string) and new format (array of bullets)
+  const bullets = Array.isArray(data) ? data : [data];
+
+  return (
+    <div className="analysis-block">
+      <h4 className="analysis-title">
+        <span className="analysis-title-text">{title}</span>
+        {status && <span className="analysis-rating-tag"> ({status})</span>}
+      </h4>
+      <ul className="analysis-bullets">
+        {bullets.map((bullet, i) => <li key={i}>{bullet}</li>)}
+      </ul>
+    </div>
   );
 }
 

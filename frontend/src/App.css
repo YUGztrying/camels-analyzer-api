@@ -595,36 +595,59 @@ button:disabled {
   font-style: italic;
 }
 
+/* Bold rows in financial tables */
+.bold-row td {
+  font-weight: 700;
+}
+
 /* Analysis section */
 .analysis-section {
   margin-top: 1.5rem;
   background: white;
   border-radius: 8px;
-  padding: 1.5rem;
+  padding: 1.5rem 2rem;
   box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .analysis-section h3 {
-  margin: 0 0 1rem 0;
+  margin: 0 0 1.2rem 0;
   color: #1a1a1a;
-  font-size: 1.2rem;
-  border-bottom: 2px solid #eee;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #ddd;
   padding-bottom: 0.5rem;
 }
 
 .analysis-block {
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 }
 
-.analysis-block h5 {
-  margin: 0 0 0.3rem 0;
-  color: #1565C0;
-  font-size: 0.95rem;
+.analysis-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.05rem;
+  color: #1a365d;
 }
 
-.analysis-block p {
-  margin: 0;
-  line-height: 1.7;
+.analysis-title-text {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  font-weight: 700;
+}
+
+.analysis-rating-tag {
+  font-weight: 600;
   color: #444;
+}
+
+.analysis-bullets {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.analysis-bullets li {
+  line-height: 1.7;
+  color: #333;
   font-size: 0.93rem;
+  margin-bottom: 0.5rem;
 }

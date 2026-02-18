@@ -180,7 +180,8 @@ def _build_period_result(bank, ratings: dict, paragraphs: dict) -> dict:
             "total_assets":            bank.total_assets,
             "total_equity":            bank.total_equity,
             "net_income":              bank.net_income,
-            "car":                     bank.car_regulatory,
+            # CAR is stored as percentage (e.g. 9.8 = 9.8%); convert to decimal
+            "car":                     bank.car_regulatory / 100.0 if bank.car_regulatory else None,
             "equity_assets":           bank.equity_assets,
             "debt_assets":             bank.debt_assets,
             "npl_ratio":               bank.npl_ratio,

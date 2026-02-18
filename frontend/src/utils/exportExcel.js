@@ -1,25 +1,20 @@
 import * as XLSX from 'xlsx';
 
-/**
- * Format a ratio value as a percentage string for the Excel export.
- * Returns 'N/A' when the value is null/undefined.
- */
 function pct(val) {
   if (val === null || val === undefined) return 'N/A';
   return `${(val * 100).toFixed(2)}%`;
 }
 
-/**
- * Format an absolute number with locale separators.
- */
 function num(val) {
   if (val === null || val === undefined) return '-';
   return val.toLocaleString();
 }
 
-/**
- * Auto-size columns by scanning data widths.
- */
+function negNum(val) {
+  if (val === null || val === undefined) return '-';
+  return `(${Math.abs(val).toLocaleString()})`;
+}
+
 function autoWidth(data) {
   if (!data || data.length === 0) return [];
   const colCount = Math.max(...data.map((row) => row.length));
@@ -36,192 +31,168 @@ function autoWidth(data) {
   return widths;
 }
 
-/**
- * Extract period labels from the periods array.
- */
-function periodLabels(periods) {
+function labels(periods) {
   return periods.map(p => p.period_label || p.bank?.fiscal_year || '?');
 }
 
-/**
- * Build the "CAMELS Ratings" sheet — multi-period columns.
- */
+/** Sheet 1: CAMELS Ratings */
 function buildRatingsSheet(periods) {
-  const labels = periodLabels(periods);
+  const hdrs = labels(periods);
   const rows = [
     ['CAMELS Ratings Summary'],
     [],
-    ['Component', ...labels],
-  ];
-
-  // Composite row
-  rows.push([
-    'Composite',
-    ...periods.map(p => {
+    ['Component', ...hdrs],
+    ['Composite', ...periods.map(p => {
       const c = p.camels_rating;
       const r = c?.composite_rating ?? c?.rating;
-      const s = c?.status;
-      return r ? `${r} — ${s}` : 'N/A';
-    }),
-  ]);
-
-  // Individual component rows
-  const components = [
-    ['C - Capital Adequacy', 'capital'],
+      return r ? `${r} — ${c?.status}` : 'N/A';
+    })],
+  ];
+  for (const [label, key] of [
+    ['C - Capital', 'capital'],
     ['A - Asset Quality', 'asset_quality'],
-    ['M - Management (Efficiency)', 'management'],
+    ['M - Management', 'management'],
     ['E - Earnings', 'earnings'],
     ['L - Liquidity', 'liquidity'],
-  ];
-
-  for (const [label, key] of components) {
-    rows.push([
-      label,
-      ...periods.map(p => {
-        const r = p.detailed_ratings?.[key];
-        return r?.rating ? `${r.rating} — ${r.status}` : 'N/A';
-      }),
-    ]);
+  ]) {
+    rows.push([label, ...periods.map(p => {
+      const r = p.detailed_ratings?.[key];
+      return r?.rating ? `${r.rating} — ${r.status}` : 'N/A';
+    })]);
   }
 
-  // Bank info
   const latest = periods[periods.length - 1];
   const bank = latest?.bank || {};
-  rows.push([]);
-  rows.push(['Bank', bank.bank_name || 'Unknown']);
-  rows.push(['Country', bank.country || 'N/A']);
-  rows.push(['Currency', bank.currency || 'XOF']);
-
+  rows.push([], ['Bank', bank.bank_name || 'Unknown'],
+    ['Country', bank.country || 'N/A'], ['Currency', bank.currency || 'XOF']);
   return rows;
 }
 
-/**
- * Build the "Key Ratios" sheet — multi-period columns.
- */
-function buildRatiosSheet(periods) {
-  const labels = periodLabels(periods);
-
-  const sections = [
-    { title: 'CAPITAL ADEQUACY', ratios: [
-      { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
-      { label: 'Debt / Assets', key: 'debt_assets', src: 'km' },
-    ]},
-    { title: 'ASSET QUALITY', ratios: [
-      { label: 'NPL Ratio', key: 'npl_ratio', src: 'km' },
-      { label: 'Coverage Ratio', key: 'coverage_ratio', src: 'km' },
-      { label: 'Cost of Risk / Avg Assets', key: 'cost_of_risk_avg_assets', src: 'km' },
-    ]},
-    { title: 'MANAGEMENT (EFFICIENCY)', ratios: [
-      { label: 'Cost-to-Income Ratio', key: 'cost_to_income', src: 'km' },
-    ]},
-    { title: 'EARNINGS', ratios: [
-      { label: 'ROAA', key: 'roaa', src: 'km' },
-      { label: 'ROAE', key: 'roae', src: 'km' },
-      { label: 'NII / Avg Assets', key: 'net_interest_income_avg_assets', src: 'bank' },
-      { label: 'Non-Interest Inc / Avg Assets', key: 'non_interest_income_avg_assets', src: 'bank' },
-      { label: 'OpEx / Avg Assets', key: 'opex_avg_assets', src: 'bank' },
-      { label: 'Tax / Avg Assets', key: 'tax_expenses_avg_assets', src: 'bank' },
-    ]},
-    { title: 'LIQUIDITY', ratios: [
-      { label: 'Liquid Assets / Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
-      { label: 'Gross Loans / Deposits', key: 'loans_deposits', src: 'km' },
-    ]},
-  ];
-
+/** Sheet 2: Financials — Balance Sheet + Income Statement + Growth */
+function buildFinancialsSheet(periods) {
+  const hdrs = labels(periods);
   const rows = [
-    ['Key Ratios by CAMELS Category'],
+    ['Financial Statements'],
     [],
-    ['Ratio', ...labels],
+    ['Balance Sheet', ...hdrs],
   ];
 
-  for (const section of sections) {
-    rows.push([]);
-    rows.push([section.title]);
-    for (const r of section.ratios) {
-      rows.push([
-        r.label,
-        ...periods.map(p => {
-          const val = r.src === 'km' ? p.key_metrics?.[r.key] : p.bank?.[r.key];
-          return pct(val);
-        }),
-      ]);
+  // Balance sheet items
+  const bsItems = [
+    ['Total Assets', 'total_assets'],
+    ['Total Liabilities', 'total_liabilities'],
+    ["Shareholder's Equity", 'total_equity'],
+    ['Cash & Cash Equivalent', 'cash_reserves_requirements'],
+    ['Investment Securities', 'investment_securities'],
+    ['Gross Loans', 'gross_loans'],
+    ['Customer Deposits', 'deposits'],
+    ['Borrowings', 'short_term_borrowings'],
+    ['Long-Term Debt', 'long_term_debt'],
+  ];
+  const bsNeg = [['Loan Loss Provisions', 'loan_loss_provisions']];
+
+  for (const [label, key] of bsItems) {
+    rows.push([label, ...periods.map(p => num(p.bank?.[key]))]);
+  }
+  for (const [label, key] of bsNeg) {
+    rows.push([label, ...periods.map(p => negNum(p.bank?.[key]))]);
+  }
+
+  // Income statement
+  rows.push([], ['Income Statement', ...hdrs]);
+  rows.push(['Net Interest Income', ...periods.map(p => num(p.bank?.net_interest_income))]);
+  rows.push(['Non-Interest Income', ...periods.map(p => {
+    const oi = p.bank?.operating_income;
+    const nii = p.bank?.net_interest_income;
+    return (oi != null && nii != null) ? num(oi - nii) : '-';
+  })]);
+  rows.push(['Operating Expenses', ...periods.map(p => negNum(p.bank?.operating_expenses))]);
+  rows.push(['Cost of Risk', ...periods.map(p => negNum(p.bank?.provision_expenses))]);
+  rows.push(['Net Profit', ...periods.map(p => num(p.bank?.net_income))]);
+
+  // Growth
+  if (periods.length > 1) {
+    rows.push([], ['Growth', ...hdrs]);
+    for (const [label, key] of [
+      ['Assets Growth', 'total_assets'],
+      ['Gross Loans', 'gross_loans'],
+      ['Deposits', 'deposits'],
+      ["Shareholders' Equity", 'total_equity'],
+    ]) {
+      rows.push([label, ...periods.map((p, i) => {
+        if (i === 0) return '—';
+        const prev = periods[i - 1].bank?.[key];
+        const curr = p.bank?.[key];
+        return (curr != null && prev != null && prev !== 0)
+          ? pct((curr - prev) / Math.abs(prev)) : 'N/A';
+      })]);
     }
   }
 
   return rows;
 }
 
-/**
- * Build the "Key Financials" sheet — multi-period columns with absolute numbers.
- */
-function buildFinancialsSheet(periods) {
-  const labels = periodLabels(periods);
-
-  const items = [
-    ['Total Assets', 'total_assets'],
-    ['Gross Loans', 'gross_loans'],
-    ['Total Deposits', 'deposits'],
-    ['Total Equity', 'total_equity'],
-    ['Interest Income', 'interest_income'],
-    ['Interest Expenses', 'interest_expenses'],
-    ['Net Interest Income', 'net_interest_income'],
-    ['Operating Income (PNB)', 'operating_income'],
-    ['Operating Expenses', 'operating_expenses'],
-    ['Provision Expenses', 'provision_expenses'],
-    ['Net Income', 'net_income'],
+/** Sheet 3: Key Ratios */
+function buildRatiosSheet(periods) {
+  const hdrs = labels(periods);
+  const sections = [
+    { title: 'SOLVENCY RATIOS', ratios: [
+      { label: 'CAR - Regulatory', key: 'car', src: 'km' },
+      { label: 'Equity / Assets', key: 'equity_assets', src: 'km' },
+    ]},
+    { title: 'ASSET QUALITY', ratios: [
+      { label: 'NPL Ratio', key: 'npl_ratio', src: 'km' },
+      { label: 'Coverage Ratio', key: 'coverage_ratio', src: 'km' },
+    ]},
+    { title: 'PROFITABILITY', ratios: [
+      { label: 'ROAA', key: 'roaa', src: 'km' },
+      { label: 'ROAE', key: 'roae', src: 'km' },
+      { label: 'Cost to Income Ratio', key: 'cost_to_income', src: 'km' },
+    ]},
+    { title: 'LIQUIDITY', ratios: [
+      { label: 'Loans/Deposits', key: 'loans_deposits', src: 'km' },
+      { label: 'Liquid Assets/Total Assets', key: 'liquid_assets_total_assets', src: 'km' },
+    ]},
   ];
 
-  const rows = [
-    ['Key Financials'],
-    [],
-    ['Item', ...labels],
-  ];
-
-  for (const [label, key] of items) {
-    rows.push([
-      label,
-      ...periods.map(p => num(p.bank?.[key])),
-    ]);
+  const rows = [['Key Ratios'], [], ['Ratio', ...hdrs]];
+  for (const section of sections) {
+    rows.push([], [section.title]);
+    for (const r of section.ratios) {
+      rows.push([r.label, ...periods.map(p => {
+        const val = r.src === 'km' ? p.key_metrics?.[r.key] : p.bank?.[r.key];
+        return pct(val);
+      })]);
+    }
   }
-
   return rows;
 }
 
-/**
- * Build the "Analysis" sheet — latest period only.
- */
+/** Sheet 4: Analysis */
 function buildAnalysisSheet(periods) {
   const latest = periods[periods.length - 1];
   const analysis = latest?.analysis || {};
   const label = latest?.period_label || latest?.bank?.fiscal_year || '';
 
-  const rows = [
-    [`CAMELS Analysis — ${label}`],
-    [],
-    ['Component', 'Analysis'],
-  ];
-
-  const sections = [
-    ['Composite', analysis.composite],
-    ['C - Capital Adequacy', analysis.capital],
-    ['A - Asset Quality', analysis.asset_quality],
-    ['M - Management (Efficiency)', analysis.management],
-    ['E - Earnings', analysis.earnings],
-    ['L - Liquidity', analysis.liquidity],
-  ];
-
-  for (const [lbl, text] of sections) {
-    rows.push([lbl, text || 'No analysis available']);
+  const rows = [[`CAMELS Analysis — ${label}`], [], ['Component', 'Analysis']];
+  for (const [title, key] of [
+    ['Capitalization', 'capital'],
+    ['Asset Quality', 'asset_quality'],
+    ['Management & Efficiency', 'management'],
+    ['Earnings & Profitability', 'earnings'],
+    ['Liquidity & Funding', 'liquidity'],
+    ['Composite Assessment', 'composite'],
+  ]) {
+    const data = analysis[key];
+    // Handle bullet arrays or legacy strings
+    const text = Array.isArray(data) ? data.join('\n') : (data || 'No analysis available');
+    rows.push([title, text]);
   }
-
   return rows;
 }
 
 /**
  * Export analysis results to an Excel (.xlsx) file and trigger a download.
- * Supports multi-period (all_periods) and single-period result formats.
- *
- * @param {Object} result - The full analysis result object from the API.
  */
 export function exportToExcel(result) {
   if (!result) return;
@@ -229,37 +200,19 @@ export function exportToExcel(result) {
   const periods = result.all_periods || [result];
   const wb = XLSX.utils.book_new();
 
-  // --- Sheet 1: CAMELS Ratings ---
-  const ratingsData = buildRatingsSheet(periods);
-  const wsRatings = XLSX.utils.aoa_to_sheet(ratingsData);
-  wsRatings['!cols'] = autoWidth(ratingsData);
-  XLSX.utils.book_append_sheet(wb, wsRatings, 'CAMELS Ratings');
+  const sheets = [
+    ['CAMELS Ratings', buildRatingsSheet(periods)],
+    ['Financials', buildFinancialsSheet(periods)],
+    ['Key Ratios', buildRatiosSheet(periods)],
+    ['Analysis', buildAnalysisSheet(periods)],
+  ];
 
-  // --- Sheet 2: Key Ratios ---
-  const ratiosData = buildRatiosSheet(periods);
-  const wsRatios = XLSX.utils.aoa_to_sheet(ratiosData);
-  wsRatios['!cols'] = autoWidth(ratiosData);
-  XLSX.utils.book_append_sheet(wb, wsRatios, 'Key Ratios');
-
-  // --- Sheet 3: Key Financials ---
-  const financialsData = buildFinancialsSheet(periods);
-  const wsFinancials = XLSX.utils.aoa_to_sheet(financialsData);
-  wsFinancials['!cols'] = autoWidth(financialsData);
-  XLSX.utils.book_append_sheet(wb, wsFinancials, 'Key Financials');
-
-  // --- Sheet 4: Analysis ---
-  const analysisData = buildAnalysisSheet(periods);
-  const wsAnalysis = XLSX.utils.aoa_to_sheet(analysisData);
-  wsAnalysis['!cols'] = autoWidth(analysisData);
-  for (let r = 3; r < analysisData.length; r++) {
-    const cellRef = XLSX.utils.encode_cell({ r, c: 1 });
-    if (wsAnalysis[cellRef]) {
-      wsAnalysis[cellRef].s = { alignment: { wrapText: true } };
-    }
+  for (const [name, data] of sheets) {
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = autoWidth(data);
+    XLSX.utils.book_append_sheet(wb, ws, name);
   }
-  XLSX.utils.book_append_sheet(wb, wsAnalysis, 'Analysis');
 
-  // --- Generate filename ---
   const latest = periods[periods.length - 1];
   const bankName = latest?.bank?.bank_name || 'Bank';
   const safeName = bankName.replace(/[^a-zA-Z0-9_-]/g, '_');

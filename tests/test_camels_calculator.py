@@ -642,4 +642,6 @@ class TestGenerateAnalysisParagraphs:
             ratings["management"], ratings["earnings"], ratings["liquidity"]
         )
         paragraphs = generate_analysis_paragraphs(bank, ratings)
-        assert "Banque Atlantique" in paragraphs["capital"]
+        # Analysis now returns lists of bullets; bank name appears in composite
+        composite_text = " ".join(paragraphs["composite"])
+        assert "Banque Atlantique" in composite_text
