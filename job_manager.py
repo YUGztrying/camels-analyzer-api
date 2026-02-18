@@ -129,6 +129,8 @@ def process_job_async(job_id: str, file_path: str):
         "provision_expenses", "provisions_formed", "impairment_financial_assets", "fx_exchange",
         "non_operating_profit_loss", "income_tax", "net_income",
         "car_regulatory", "car_bank_reported", "npls_mn", "llr_mn",
+        "npl_ratio_reported", "coverage_ratio_reported",
+        "roe_reported", "roa_reported", "cost_income_reported",
         "fx_rate_period_end", "fx_rate_period_avg",
     ]
 

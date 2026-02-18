@@ -50,15 +50,19 @@ def _safe_divide(numerator, denominator):
 
 def _calculate_average(current, previous=None):
     """Average of current and previous period value; falls back to current."""
+    if current is not None and previous is not None and previous != 0:
+        return (current + previous) / 2
+    if current is not None and current != 0:
+        return current
     if previous is not None and previous != 0:
-        if current:
-            return (current + previous) / 2
         return previous
-    return current if current else 0
+    return None
 
 
-def _get(obj, attr, default=0):
+def _get(obj, attr, default=None):
     """Safely read an attribute, returning *default* when None."""
+    if obj is None:
+        return default
     val = getattr(obj, attr, None)
     return val if val is not None else default
 
@@ -85,6 +89,11 @@ def calculate_all_ratios(bank, prev_bank=None):
     averages.  Returns the mutated bank.
     """
 
+    # Helper to sum only non-None values; returns None if all are None
+    def _sum(*vals):
+        non_none = [v for v in vals if v is not None]
+        return sum(non_none) if non_none else None
+
     # Averages (current + previous period)
     avg_assets = _calculate_average(_get(bank, 'total_assets'), _get(prev_bank, 'total_assets') if prev_bank else None)
     avg_equity = _calculate_average(_get(bank, 'total_equity'), _get(prev_bank, 'total_equity') if prev_bank else None)
@@ -93,40 +102,57 @@ def calculate_all_ratios(bank, prev_bank=None):
     # ===== C — CAPITAL ADEQUACY =====
     bank.equity_assets = _safe_divide(_get(bank, 'total_equity'), _get(bank, 'total_assets'))
 
-    total_debt = _get(bank, 'short_term_borrowings') + _get(bank, 'long_term_debt')
-    bank.debt_assets = _safe_divide(total_debt, _get(bank, 'total_assets')) if total_debt else None
+    total_debt = _sum(_get(bank, 'short_term_borrowings'), _get(bank, 'long_term_debt'))
+    bank.debt_assets = _safe_divide(total_debt, _get(bank, 'total_assets'))
 
     # ===== A — ASSET QUALITY =====
     npls = _get(bank, 'npls_mn')
-    llp = abs(_get(bank, 'loan_loss_provisions'))  # ECL — stored negative sometimes
-    ecl = _get(bank, 'provision_expenses')  # income-statement ECL charge
+    llp_raw = _get(bank, 'loan_loss_provisions')
+    llp = abs(llp_raw) if llp_raw is not None else None
+    ecl = _get(bank, 'provision_expenses')
 
     bank.npl_ratio = _safe_divide(npls, _get(bank, 'gross_loans'))
-    bank.coverage_ratio = _safe_divide(llp, npls) if npls else None
-    bank.cost_of_risk_avg_assets = _safe_divide(ecl, avg_assets) if ecl else None
+    # Fallback to bank-reported NPL ratio (stored as percentage, e.g. 5.2 -> 0.052)
+    if bank.npl_ratio is None:
+        reported = _get(bank, 'npl_ratio_reported')
+        if reported is not None:
+            bank.npl_ratio = reported / 100.0
+
+    bank.coverage_ratio = _safe_divide(llp, npls)
+    if bank.coverage_ratio is None:
+        reported = _get(bank, 'coverage_ratio_reported')
+        if reported is not None:
+            bank.coverage_ratio = reported / 100.0
+
+    bank.cost_of_risk_avg_assets = _safe_divide(ecl, avg_assets)
 
     # Extra legacy ratios
     foreclosed = _get(bank, 'foreclosed_assets')
-    problem_assets = npls + foreclosed
-    bank.problem_assets_mn = problem_assets if problem_assets else None
+    problem_assets = _sum(npls, foreclosed)
+    bank.problem_assets_mn = problem_assets
 
     llr = _get(bank, 'llr_mn')
-    if llr == 0 and llp != 0:
+    if llr is None and llp is not None:
         llr = llp
 
-    npa_denom = _get(bank, 'gross_loans') + foreclosed
+    npa_denom = _sum(_get(bank, 'gross_loans'), foreclosed)
     bank.npa_ratio = _safe_divide(problem_assets, npa_denom)
     bank.llr_avg_loan = _safe_divide(llr, avg_gross_loans)
-    bank.oler = _safe_divide(problem_assets - llr, _get(bank, 'total_equity'))
+    oler_num = _sum(problem_assets, -llr if llr is not None else None) if problem_assets is not None and llr is not None else None
+    bank.oler = _safe_divide(oler_num, _get(bank, 'total_equity'))
 
     # ===== M — MANAGEMENT (Efficiency) =====
     op_income = _get(bank, 'operating_income')
-    if not op_income:
+    if op_income is None:
         # Derive operating income = net interest income + non-interest income
         nii = _get(bank, 'net_interest_income')
-        non_ii = _get(bank, 'non_interest_income_commissions') + _get(bank, 'net_income_investment') + _get(bank, 'other_net_income')
+        non_ii = _sum(
+            _get(bank, 'non_interest_income_commissions'),
+            _get(bank, 'net_income_investment'),
+            _get(bank, 'other_net_income'),
+        )
         # Also try granular non-interest income
-        granular_non_ii = sum([
+        granular_non_ii = _sum(
             _get(bank, 'fees_commissions'),
             _get(bank, 'net_sales'),
             _get(bank, 'dividends'),
@@ -136,32 +162,46 @@ def calculate_all_ratios(bank, prev_bank=None):
             _get(bank, 'share_profit_associates'),
             _get(bank, 'other_revenues'),
             _get(bank, 'gain_acquisition_subsidiaries'),
-        ])
-        if granular_non_ii:
+        )
+        if granular_non_ii is not None:
             non_ii = granular_non_ii
-        op_income = nii + non_ii if (nii or non_ii) else 0
+        op_income = _sum(nii, non_ii)
 
-    bank.cost_to_income = _safe_divide(_get(bank, 'operating_expenses'), op_income) if op_income else None
+    bank.cost_to_income = _safe_divide(_get(bank, 'operating_expenses'), op_income)
+    if bank.cost_to_income is None:
+        reported = _get(bank, 'cost_income_reported')
+        if reported is not None:
+            bank.cost_to_income = reported / 100.0
 
     # ===== E — EARNINGS =====
-    net_profit = _get(bank, 'net_income') or _get(bank, 'net_profit')
+    net_profit = _get(bank, 'net_income')
+    if net_profit is None:
+        net_profit = _get(bank, 'net_profit')
 
-    # ROAA & ROAE — direct formula
+    # ROAA & ROAE — direct formula, with reported fallback
     bank.roaa = _safe_divide(net_profit, avg_assets)
+    if bank.roaa is None:
+        reported = _get(bank, 'roa_reported')
+        if reported is not None:
+            bank.roaa = reported / 100.0
+
     bank.roae = _safe_divide(net_profit, avg_equity)
+    if bank.roae is None:
+        reported = _get(bank, 'roe_reported')
+        if reported is not None:
+            bank.roae = reported / 100.0
 
     # Net Interest Income / Avg Assets
-    # Note: interest_expenses is extracted as a positive number, so we subtract
-    # to get net interest income. Falls back to net_interest_income if available.
     nii_val = _get(bank, 'net_interest_income')
-    if not nii_val:
+    if nii_val is None:
         ii = _get(bank, 'interest_income')
         ie = _get(bank, 'interest_expenses')
-        nii_val = ii - ie if (ii or ie) else 0
-    bank.net_interest_income_avg_assets = _safe_divide(nii_val, avg_assets) if nii_val else None
+        if ii is not None or ie is not None:
+            nii_val = (ii or 0) - (ie or 0)
+    bank.net_interest_income_avg_assets = _safe_divide(nii_val, avg_assets)
 
     # Non-Interest Income / Avg Assets (granular)
-    non_ii_total = sum([
+    non_ii_total = _sum(
         _get(bank, 'fees_commissions'),
         _get(bank, 'net_sales'),
         _get(bank, 'dividends'),
@@ -171,32 +211,36 @@ def calculate_all_ratios(bank, prev_bank=None):
         _get(bank, 'share_profit_associates'),
         _get(bank, 'other_revenues'),
         _get(bank, 'gain_acquisition_subsidiaries'),
-    ])
-    if not non_ii_total:
+    )
+    if non_ii_total is None:
         # Fallback to aggregate fields
-        non_ii_total = _get(bank, 'non_interest_income_commissions') + _get(bank, 'net_income_investment') + _get(bank, 'other_net_income')
-    bank.non_interest_income_avg_assets = _safe_divide(non_ii_total, avg_assets) if non_ii_total else None
+        non_ii_total = _sum(
+            _get(bank, 'non_interest_income_commissions'),
+            _get(bank, 'net_income_investment'),
+            _get(bank, 'other_net_income'),
+        )
+    bank.non_interest_income_avg_assets = _safe_divide(non_ii_total, avg_assets)
 
     # Operating Expenses / Avg Assets (granular)
-    opex_granular = sum([
+    opex_granular = _sum(
         _get(bank, 'wages_salaries'),
         _get(bank, 'other_opex'),
         _get(bank, 'intangible_amortization'),
         _get(bank, 'fixed_asset_depreciation'),
-    ])
-    opex_val = opex_granular if opex_granular else _get(bank, 'operating_expenses')
+    )
+    opex_val = opex_granular if opex_granular is not None else _get(bank, 'operating_expenses')
     bank.opex_avg_assets = _safe_divide(opex_val, avg_assets)
 
     # Tax Expenses / Avg Assets
     bank.tax_expenses_avg_assets = _safe_divide(_get(bank, 'income_tax'), avg_assets)
 
     # Other Income / Avg Assets
-    other_income = sum([
+    other_income = _sum(
         _get(bank, 'provisions_formed'),
         _get(bank, 'impairment_financial_assets'),
         _get(bank, 'fx_exchange'),
-    ])
-    bank.other_income_avg_assets = _safe_divide(other_income, avg_assets) if other_income else None
+    )
+    bank.other_income_avg_assets = _safe_divide(other_income, avg_assets)
 
     # Legacy DuPont fields (kept for backward compatibility)
     bank.net_interest_margin = _safe_divide(_get(bank, 'net_interest_income'), avg_assets)
@@ -212,15 +256,16 @@ def calculate_all_ratios(bank, prev_bank=None):
 
     yield_on_assets = _safe_divide(_get(bank, 'interest_income'), _get(bank, 'total_assets'))
     cost_of_liabs = _safe_divide(_get(bank, 'interest_expenses'), _get(bank, 'total_liabilities'))
-    spread = (yield_on_assets or 0) - (cost_of_liabs or 0)
-    bank.net_interest_spread = spread if (yield_on_assets is not None or cost_of_liabs is not None) else None
-    bank.interest_earning_assets_yield = _safe_divide(
-        _get(bank, 'interest_income'),
-        _get(bank, 'gross_loans') + _get(bank, 'investment_securities'))
+    if yield_on_assets is not None and cost_of_liabs is not None:
+        bank.net_interest_spread = yield_on_assets - cost_of_liabs
+    else:
+        bank.net_interest_spread = None
+    earning_assets = _sum(_get(bank, 'gross_loans'), _get(bank, 'investment_securities'))
+    bank.interest_earning_assets_yield = _safe_divide(_get(bank, 'interest_income'), earning_assets)
     bank.cost_of_funds = _safe_divide(_get(bank, 'interest_expenses'), _get(bank, 'total_liabilities'))
 
     # ===== L — LIQUIDITY =====
-    liquid_assets = _get(bank, 'cash_reserves_requirements') + _get(bank, 'due_from_banks') + _get(bank, 'investment_securities')
+    liquid_assets = _sum(_get(bank, 'cash_reserves_requirements'), _get(bank, 'due_from_banks'), _get(bank, 'investment_securities'))
     bank.liquid_assets_total_assets = _safe_divide(liquid_assets, _get(bank, 'total_assets'))
     bank.liquid_assets_assets = bank.liquid_assets_total_assets  # legacy alias
     bank.cash_reserves_assets = _safe_divide(_get(bank, 'cash_reserves_requirements'), _get(bank, 'total_assets'))

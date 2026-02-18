@@ -76,7 +76,7 @@ INCOME STATEMENT:
 
 - interest_income -> "Produits d'interets" / "Interest Income"
 - interest_expenses -> "Charges d'interets" / "Interest Expenses" (as positive number)
-- net_interest_income -> "Produit net bancaire" / "Net Interest Income"
+- net_interest_income -> "Marge d'interet" / "Net Interest Income" (= Interest Income MINUS Interest Expenses ONLY)
 
 NON-INTEREST INCOME (extract as much detail as possible):
 - fees_commissions -> "Commissions" / "Fees & Commissions"
@@ -97,7 +97,9 @@ OPERATING EXPENSES (extract as much detail as possible):
 - fixed_asset_depreciation -> "Amortissement des immobilisations corporelles" / "Depreciation"
 - operating_expenses -> aggregate total operating expenses
 
-- operating_income -> "Produit d'exploitation" / "Operating Income" / "Produit Net Bancaire" (total income before expenses)
+- net_income_investment -> "Revenus de placements" / "Investment Income" (income from securities/investments)
+- other_net_income -> "Autres produits nets" / "Other Net Income"
+- operating_income -> "Produit Net Bancaire" / "PNB" / "Operating Income" / "Total Banking Income" (= NII + commissions + all non-interest income, BEFORE operating expenses)
 - operating_profit -> "Resultat d'exploitation" / "Operating Profit"
 
 OTHER P&L:
@@ -166,6 +168,8 @@ All amounts as ABSOLUTE values except loan_loss_provisions (negative).
     "other_revenues": 2000,
     "gain_acquisition_subsidiaries": null,
     "non_interest_income_commissions": 10000,
+    "net_income_investment": null,
+    "other_net_income": null,
     "wages_salaries": 15000,
     "other_opex": 10000,
     "intangible_amortization": 2000,
