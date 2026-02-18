@@ -94,6 +94,13 @@ def calculate_all_ratios(bank, prev_bank=None):
         non_none = [v for v in vals if v is not None]
         return sum(non_none) if non_none else None
 
+    # Always recalculate NII from components when both are available —
+    # the LLM sometimes maps PNB (which includes commissions) to net_interest_income.
+    ii = _get(bank, 'interest_income')
+    ie = _get(bank, 'interest_expenses')
+    if ii is not None and ie is not None:
+        bank.net_interest_income = ii - ie  # interest_expenses stored as positive
+
     # Averages (current + previous period)
     avg_assets = _calculate_average(_get(bank, 'total_assets'), _get(prev_bank, 'total_assets') if prev_bank else None)
     avg_equity = _calculate_average(_get(bank, 'total_equity'), _get(prev_bank, 'total_equity') if prev_bank else None)
