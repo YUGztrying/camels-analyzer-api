@@ -22,6 +22,7 @@ from statement_reader import (
 logger = logging.getLogger(__name__)
 
 CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+CORS_REGEX = os.getenv("CORS_ORIGIN_REGEX", r"https://.*\.vercel\.app")
 _enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
 
 app = FastAPI(
@@ -35,6 +36,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in CORS_ORIGINS],
+    allow_origin_regex=CORS_REGEX,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type", "Authorization"],
