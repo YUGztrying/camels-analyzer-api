@@ -5,17 +5,15 @@ import StatementSelector from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
 import CompositeRating from './components/CompositeRating';
 import CAMELSSection from './components/CAMELSSection';
-import { BalanceSheet, IncomeStatement } from './components/FinancialStatement';
 import MetricsGrid from './components/MetricsGrid';
 
 function App() {
   const {
-    companies, selectedCompany, statements, selectedStatement,
+    companies, selectedCompany, periods, selectedPeriod,
     loading, loadingCompanies, result, error,
-    handleCompanyChange, handleStatementChange, handleAnalyze,
+    handleCompanyChange, handlePeriodChange, handleAnalyze,
   } = useAnalyzer();
 
-  const stmt = result?.statement;
   const ratings = result?.ratings;
   const analysis = result?.analysis;
   const km = result?.key_metrics;
@@ -29,12 +27,12 @@ function App() {
         <StatementSelector
           companies={companies}
           selectedCompany={selectedCompany}
-          statements={statements}
-          selectedStatement={selectedStatement}
+          periods={periods}
+          selectedPeriod={selectedPeriod}
           loadingCompanies={loadingCompanies}
           loading={loading}
           onCompanyChange={handleCompanyChange}
-          onStatementChange={handleStatementChange}
+          onPeriodChange={handlePeriodChange}
           onAnalyze={handleAnalyze}
         />
 
@@ -44,8 +42,8 @@ function App() {
         {result && (
           <div className="result">
             <div className="bank-info">
-              <h3>{result.bank_name || 'Unknown Bank'}</h3>
-              <p>{result.country || ''} — Fiscal Year {result.fiscal_year || ''} — {result.currency || 'XOF'}</p>
+              <h3>{result.company_name || 'Unknown'}</h3>
+              <p>{result.type_institution || ''} — Period {result.period || ''} — {result.currency || 'XOF'}</p>
             </div>
 
             <CompositeRating camelsRating={ratings?.composite} analysis={analysis} />
@@ -69,9 +67,9 @@ function App() {
               rating={ratings?.asset_quality}
               analysis={analysis?.asset_quality}
               ratios={[
-                { name: 'NPL Ratio', formula: 'NPLs (Stage 3) / Gross Loans', value: km?.npl_ratio },
-                { name: 'Coverage Ratio', formula: 'Loan Loss Provisions (ECL) / NPLs', value: km?.coverage_ratio },
-                { name: 'Cost of Risk / Avg Assets', formula: 'ECL / Average Total Assets', value: km?.cost_of_risk_avg_assets },
+                { name: 'NPL Ratio', formula: 'NPLs / Gross Loans', value: km?.npl_ratio },
+                { name: 'Coverage Ratio', formula: 'Loan Loss Provisions / NPLs', value: km?.coverage_ratio },
+                { name: 'Cost of Risk / Avg Assets', formula: 'Provision Expense / Average Total Assets', value: km?.cost_of_risk_avg_assets },
               ]}
             />
 
@@ -93,13 +91,12 @@ function App() {
               rating={ratings?.earnings}
               analysis={analysis?.earnings}
               ratios={[
-                { name: 'ROAA', formula: 'Net Profit / Average Total Assets', value: km?.roaa },
-                { name: 'ROAE', formula: "Net Profit / Average Shareholders' Equity", value: km?.roae },
+                { name: 'ROAA', formula: 'Net Income / Average Total Assets', value: km?.roaa },
+                { name: 'ROAE', formula: "Net Income / Average Shareholders' Equity", value: km?.roae },
                 { name: 'Net Interest Income / Avg Assets', formula: 'Net Interest Income / Avg Total Assets', value: result?.ratios?.net_interest_income_avg_assets },
                 { name: 'Non-Interest Income / Avg Assets', formula: '(Fees & Commissions + ...) / Avg Total Assets', value: result?.ratios?.non_interest_income_avg_assets },
-                { name: 'Operating Expenses / Avg Assets', formula: '(Wages + Other OpEx + ...) / Avg Total Assets', value: result?.ratios?.opex_avg_assets },
+                { name: 'Operating Expenses / Avg Assets', formula: 'Operating Expenses / Avg Total Assets', value: result?.ratios?.opex_avg_assets },
                 { name: 'Tax Expenses / Avg Assets', formula: 'Tax Expenses / Avg Total Assets', value: result?.ratios?.tax_expenses_avg_assets },
-                { name: 'Other Income / Avg Assets', formula: '(Provisions Formed + Impairment + FX) / Avg Total Assets', value: result?.ratios?.other_income_avg_assets },
               ]}
             />
 
@@ -110,12 +107,11 @@ function App() {
               rating={ratings?.liquidity}
               analysis={analysis?.liquidity}
               ratios={[
-                { name: 'Liquid Assets / Total Assets', formula: '(Cash & Deposits with Banks + Investment Securities) / Total Assets', value: km?.liquid_assets_total_assets },
+                { name: 'Liquid Assets / Total Assets', formula: '(Cash + Due from Banks + Investment Securities) / Total Assets', value: km?.liquid_assets_total_assets },
+                { name: 'Gross Loans / Deposits', formula: 'Gross Loans / Total Deposits', value: km?.gross_loans_deposits },
               ]}
             />
 
-            <BalanceSheet bank={stmt} />
-            <IncomeStatement bank={stmt} />
             <MetricsGrid metrics={km} />
           </div>
         )}

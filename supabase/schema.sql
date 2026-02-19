@@ -1,132 +1,21 @@
 -- =============================================================================
 -- CAMELS Analyzer — Supabase Schema
--- Shared between the Spreading App (writes financial data) and the CAMELS App
--- (reads financial data, writes analyses).
+-- Only the camels_analyses table is created by this app.
+-- The financial_statements table already exists (created by the Spreading App).
+-- Both apps share the same Supabase project.
 -- =============================================================================
 
 -- --------------------------------------------------------
--- 1. COMPANIES
--- --------------------------------------------------------
-CREATE TABLE IF NOT EXISTS companies (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    name        TEXT NOT NULL,
-    country     TEXT NOT NULL,
-    entity_type TEXT NOT NULL DEFAULT 'bank',  -- 'bank' | 'mfi'
-    created_at  TIMESTAMPTZ DEFAULT now(),
-    updated_at  TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE INDEX IF NOT EXISTS idx_companies_user ON companies(user_id);
-
--- --------------------------------------------------------
--- 2. FINANCIAL STATEMENTS
--- Written by the Spreading App after LLM extraction + IFC normalization.
--- Read by the CAMELS App to compute ratings.
--- --------------------------------------------------------
-CREATE TABLE IF NOT EXISTS financial_statements (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id  UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    fiscal_year TEXT NOT NULL,
-    statement_type TEXT DEFAULT 'annual',  -- 'annual' | 'interim'
-    currency    TEXT DEFAULT 'XOF',
-
-    -- Balance Sheet — Assets
-    cash_reserves_requirements   FLOAT8,
-    due_from_banks               FLOAT8,
-    investment_securities        FLOAT8,
-    gross_loans                  FLOAT8,
-    loan_loss_provisions         FLOAT8,
-    foreclosed_assets            FLOAT8,
-    investment_in_subs_affiliates FLOAT8,
-    other_assets                 FLOAT8,
-    fixed_assets                 FLOAT8,
-    total_assets                 FLOAT8 NOT NULL,
-
-    -- Balance Sheet — Liabilities
-    deposits              FLOAT8,
-    short_term_borrowings FLOAT8,
-    long_term_debt        FLOAT8,
-    interbank_liabilities FLOAT8,
-    other_liabilities     FLOAT8,
-    total_liabilities     FLOAT8,
-
-    -- Balance Sheet — Equity
-    paid_in_capital   FLOAT8,
-    reserves          FLOAT8,
-    retained_earnings FLOAT8,
-    net_profit        FLOAT8,
-    total_equity      FLOAT8,
-
-    -- Income Statement
-    interest_income    FLOAT8,
-    interest_expenses  FLOAT8,
-    net_interest_income FLOAT8,
-
-    -- Non-interest income breakdown
-    fees_commissions                FLOAT8,
-    net_sales                       FLOAT8,
-    dividends                       FLOAT8,
-    fvtpl_changes                   FLOAT8,
-    securitization_gains            FLOAT8,
-    provisions_no_longer_required   FLOAT8,
-    share_profit_associates         FLOAT8,
-    other_revenues                  FLOAT8,
-    gain_acquisition_subsidiaries   FLOAT8,
-    non_interest_income_commissions FLOAT8,
-    net_income_investment           FLOAT8,
-    other_net_income                FLOAT8,
-
-    -- Operating expenses breakdown
-    wages_salaries          FLOAT8,
-    other_opex              FLOAT8,
-    intangible_amortization FLOAT8,
-    fixed_asset_depreciation FLOAT8,
-    operating_expenses      FLOAT8,
-    operating_income        FLOAT8,
-    operating_profit        FLOAT8,
-
-    -- Other P&L
-    provision_expenses          FLOAT8,
-    provisions_formed           FLOAT8,
-    impairment_financial_assets FLOAT8,
-    fx_exchange                 FLOAT8,
-    non_operating_profit_loss   FLOAT8,
-    income_tax                  FLOAT8,
-    net_income                  FLOAT8,
-
-    -- Prudential ratios (as reported in the document)
-    npls_mn            FLOAT8,
-    llr_mn             FLOAT8,
-    car_regulatory     FLOAT8,
-    car_bank_reported  FLOAT8,
-
-    -- FX rates
-    fx_rate_period_end FLOAT8,
-    fx_rate_period_avg FLOAT8,
-
-    -- Source tracking
-    source_file_url TEXT,
-
-    created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now(),
-
-    UNIQUE(company_id, fiscal_year, statement_type)
-);
-
-CREATE INDEX IF NOT EXISTS idx_statements_company ON financial_statements(company_id);
-CREATE INDEX IF NOT EXISTS idx_statements_user    ON financial_statements(user_id);
-
--- --------------------------------------------------------
--- 3. CAMELS ANALYSES
--- Written and read by the CAMELS App.
+-- CAMELS ANALYSES
+-- Keyed by (user_id, company_name, period) to match
+-- the Spreading App's data model (no companies table).
 -- --------------------------------------------------------
 CREATE TABLE IF NOT EXISTS camels_analyses (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    statement_id UUID NOT NULL REFERENCES financial_statements(id) ON DELETE CASCADE UNIQUE,
-    company_id   UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
     user_id      UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    company_name TEXT NOT NULL,
+    period       TEXT NOT NULL,                -- ISO date, e.g. "2023-12-31"
+    type_institution TEXT NOT NULL DEFAULT 'banque',  -- 'banque' | 'microfinance'
 
     -- Computed ratios — Capital
     equity_assets FLOAT8,
@@ -180,41 +69,21 @@ CREATE TABLE IF NOT EXISTS camels_analyses (
     analysis_composite     TEXT,
 
     created_at TIMESTAMPTZ DEFAULT now(),
-    updated_at TIMESTAMPTZ DEFAULT now()
+    updated_at TIMESTAMPTZ DEFAULT now(),
+
+    -- One analysis per (user, company, period)
+    UNIQUE(user_id, company_name, period)
 );
 
-CREATE INDEX IF NOT EXISTS idx_analyses_statement ON camels_analyses(statement_id);
-CREATE INDEX IF NOT EXISTS idx_analyses_company   ON camels_analyses(company_id);
 CREATE INDEX IF NOT EXISTS idx_analyses_user      ON camels_analyses(user_id);
+CREATE INDEX IF NOT EXISTS idx_analyses_company   ON camels_analyses(company_name);
+CREATE INDEX IF NOT EXISTS idx_analyses_period    ON camels_analyses(period);
 
 -- --------------------------------------------------------
--- 4. ROW LEVEL SECURITY
+-- ROW LEVEL SECURITY
 -- --------------------------------------------------------
-ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
-ALTER TABLE financial_statements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE camels_analyses ENABLE ROW LEVEL SECURITY;
 
--- Companies
-CREATE POLICY "Users can view own companies"
-    ON companies FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own companies"
-    ON companies FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own companies"
-    ON companies FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own companies"
-    ON companies FOR DELETE USING (auth.uid() = user_id);
-
--- Financial statements
-CREATE POLICY "Users can view own statements"
-    ON financial_statements FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can insert own statements"
-    ON financial_statements FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Users can update own statements"
-    ON financial_statements FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "Users can delete own statements"
-    ON financial_statements FOR DELETE USING (auth.uid() = user_id);
-
--- CAMELS analyses
 CREATE POLICY "Users can view own analyses"
     ON camels_analyses FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "Users can insert own analyses"
@@ -225,7 +94,7 @@ CREATE POLICY "Users can delete own analyses"
     ON camels_analyses FOR DELETE USING (auth.uid() = user_id);
 
 -- --------------------------------------------------------
--- 5. AUTO-UPDATE updated_at TRIGGER
+-- AUTO-UPDATE updated_at TRIGGER
 -- --------------------------------------------------------
 CREATE OR REPLACE FUNCTION update_updated_at()
 RETURNS TRIGGER AS $$
@@ -234,14 +103,6 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
-
-CREATE TRIGGER companies_updated_at
-    BEFORE UPDATE ON companies
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
-
-CREATE TRIGGER statements_updated_at
-    BEFORE UPDATE ON financial_statements
-    FOR EACH ROW EXECUTE FUNCTION update_updated_at();
 
 CREATE TRIGGER analyses_updated_at
     BEFORE UPDATE ON camels_analyses

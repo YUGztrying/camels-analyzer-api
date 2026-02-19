@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { listCompanies, listStatements, analyzeStatement } from '../services/api';
+import { listCompanies, listPeriods, analyzeCompany } from '../services/api';
 
 export function useAnalyzer() {
   const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(null);
-  const [statements, setStatements] = useState([]);
-  const [selectedStatement, setSelectedStatement] = useState(null);
+  const [periods, setPeriods] = useState([]);
+  const [selectedPeriod, setSelectedPeriod] = useState(null);
   const [loading, setLoading] = useState(false);
   const [loadingCompanies, setLoadingCompanies] = useState(true);
   const [result, setResult] = useState(null);
@@ -20,38 +20,37 @@ export function useAnalyzer() {
       .finally(() => setLoadingCompanies(false));
   }, []);
 
-  // Fetch statements when company changes
+  // Fetch periods when company changes
   useEffect(() => {
     if (!selectedCompany) {
-      setStatements([]);
-      setSelectedStatement(null);
+      setPeriods([]);
+      setSelectedPeriod(null);
       return;
     }
-    setStatements([]);
-    setSelectedStatement(null);
+    setPeriods([]);
+    setSelectedPeriod(null);
     setResult(null);
     setError(null);
 
-    listStatements(selectedCompany.id)
-      .then((data) => setStatements(data.statements || []))
-      .catch((err) => setError('Failed to load statements: ' + err.message));
+    listPeriods(selectedCompany.company_name)
+      .then((data) => setPeriods(data.periods || []))
+      .catch((err) => setError('Failed to load periods: ' + err.message));
   }, [selectedCompany]);
 
-  const handleCompanyChange = (companyId) => {
-    const company = companies.find((c) => c.id === companyId) || null;
+  const handleCompanyChange = (companyName) => {
+    const company = companies.find((c) => c.company_name === companyName) || null;
     setSelectedCompany(company);
   };
 
-  const handleStatementChange = (statementId) => {
-    const stmt = statements.find((s) => s.id === statementId) || null;
-    setSelectedStatement(stmt);
+  const handlePeriodChange = (period) => {
+    setSelectedPeriod(period);
     setResult(null);
     setError(null);
   };
 
   const handleAnalyze = async () => {
-    if (!selectedStatement) {
-      setError('Please select a financial statement');
+    if (!selectedCompany || !selectedPeriod) {
+      setError('Please select a company and period');
       return;
     }
 
@@ -60,7 +59,7 @@ export function useAnalyzer() {
     setResult(null);
 
     try {
-      const data = await analyzeStatement(selectedStatement.id);
+      const data = await analyzeCompany(selectedCompany.company_name, selectedPeriod);
       setResult(data);
     } catch (err) {
       const msg = err.response?.data?.detail || err.message;
@@ -73,14 +72,14 @@ export function useAnalyzer() {
   return {
     companies,
     selectedCompany,
-    statements,
-    selectedStatement,
+    periods,
+    selectedPeriod,
     loading,
     loadingCompanies,
     result,
     error,
     handleCompanyChange,
-    handleStatementChange,
+    handlePeriodChange,
     handleAnalyze,
   };
 }

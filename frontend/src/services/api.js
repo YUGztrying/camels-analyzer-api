@@ -1,29 +1,42 @@
 import axios from 'axios';
 
-// In production, VITE_API_URL points to the deployed backend.
-// In development, the Vite proxy handles /api -> localhost:8000.
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 30000,
 });
 
-export const listCompanies = async () => {
-  const response = await api.get('/companies');
+// Pass user_id as query param for development.
+// In production, the Supabase JWT in Authorization header handles auth.
+const getUserId = () => {
+  // Try to get from Supabase session or localStorage
+  return localStorage.getItem('camels_user_id') || '';
+};
+
+export const listCompanies = async (userId) => {
+  const uid = userId || getUserId();
+  const response = await api.get('/companies', { params: { user_id: uid } });
   return response.data;
 };
 
-export const listStatements = async (companyId) => {
-  const response = await api.get(`/companies/${companyId}/statements`);
+export const listPeriods = async (companyName, userId) => {
+  const uid = userId || getUserId();
+  const response = await api.get(`/companies/${encodeURIComponent(companyName)}/periods`, {
+    params: { user_id: uid },
+  });
   return response.data;
 };
 
-export const getStatement = async (statementId) => {
-  const response = await api.get(`/statements/${statementId}`);
+export const analyzeCompany = async (companyName, period, userId) => {
+  const uid = userId || getUserId();
+  const response = await api.post('/analyze', null, {
+    params: { company_name: companyName, period, user_id: uid },
+  });
   return response.data;
 };
 
-export const analyzeStatement = async (statementId) => {
-  const response = await api.post(`/statements/${statementId}/analyze`);
+export const listAnalyses = async (userId) => {
+  const uid = userId || getUserId();
+  const response = await api.get('/analyses', { params: { user_id: uid } });
   return response.data;
 };
 

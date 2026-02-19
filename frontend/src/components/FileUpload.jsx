@@ -1,16 +1,14 @@
 export default function StatementSelector({
   companies,
   selectedCompany,
-  statements,
-  selectedStatement,
+  periods,
+  selectedPeriod,
   loadingCompanies,
   loading,
   onCompanyChange,
-  onStatementChange,
+  onPeriodChange,
   onAnalyze,
 }) {
-  const fmtAssets = (v) => (v != null ? Number(v).toLocaleString() : '');
-
   return (
     <div className="upload-section">
       {/* Company selector */}
@@ -20,45 +18,45 @@ export default function StatementSelector({
         </label>
         <select
           id="company-select"
-          value={selectedCompany?.id || ''}
+          value={selectedCompany?.company_name || ''}
           onChange={(e) => onCompanyChange(e.target.value)}
           disabled={loadingCompanies}
           style={{ width: '100%', padding: '0.6rem', fontSize: '1rem', borderRadius: '6px', border: '1px solid #ccc' }}
         >
           <option value="">{loadingCompanies ? 'Loading companies...' : '-- Select a company --'}</option>
           {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.country})
+            <option key={c.company_name} value={c.company_name}>
+              {c.company_name} ({c.type_institution})
             </option>
           ))}
         </select>
       </div>
 
-      {/* Statement selector */}
+      {/* Period selector */}
       {selectedCompany && (
         <div style={{ marginBottom: '1rem' }}>
-          <label htmlFor="statement-select" style={{ fontWeight: 600, display: 'block', marginBottom: '0.4rem', textAlign: 'left' }}>
-            Financial Statement
+          <label htmlFor="period-select" style={{ fontWeight: 600, display: 'block', marginBottom: '0.4rem', textAlign: 'left' }}>
+            Period
           </label>
           <select
-            id="statement-select"
-            value={selectedStatement?.id || ''}
-            onChange={(e) => onStatementChange(e.target.value)}
+            id="period-select"
+            value={selectedPeriod || ''}
+            onChange={(e) => onPeriodChange(e.target.value)}
             style={{ width: '100%', padding: '0.6rem', fontSize: '1rem', borderRadius: '6px', border: '1px solid #ccc' }}
           >
             <option value="">
-              {statements.length === 0 ? 'No statements available' : '-- Select a period --'}
+              {periods.length === 0 ? 'No periods available' : '-- Select a period --'}
             </option>
-            {statements.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.fiscal_year} ({s.statement_type}) — Assets: {fmtAssets(s.total_assets)} {s.currency}
+            {periods.map((p) => (
+              <option key={p} value={p}>
+                {p}
               </option>
             ))}
           </select>
         </div>
       )}
 
-      <button onClick={onAnalyze} disabled={loading || !selectedStatement}>
+      <button onClick={onAnalyze} disabled={loading || !selectedPeriod}>
         {loading ? 'Analyzing...' : 'Run CAMELS Analysis'}
       </button>
     </div>
