@@ -1,265 +1,223 @@
 """
-API integration tests for main.py — uses FastAPI's TestClient with an
-in-memory SQLite database (no PostgreSQL needed for tests).
+API endpoint tests for the CAMELS Analyzer — v4 (Spreading App integration).
+Uses mocked Supabase and statement_reader to test the FastAPI endpoints.
 """
-import os
-import io
 import pytest
 from unittest.mock import patch, MagicMock
+from fastapi.testclient import TestClient
 
-# Use SQLite for tests
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test-key"
-os.environ["ENABLE_DOCS"] = "true"
+from main import app
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from database import Base, get_db
-from main import app, _upload_limiter
-
-# Override DB with SQLite
-TEST_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(autouse=True)
-def setup_db():
-    """Create tables before each test, drop after."""
-    from models import BankDB  # noqa
-    from job_manager import JobDB  # noqa
-    Base.metadata.create_all(bind=engine)
-    # Reset rate limiter between tests
-    _upload_limiter._requests.clear()
-    yield
-    Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture
-def client():
-    from fastapi.testclient import TestClient
-    return TestClient(app)
+client = TestClient(app)
 
 
 # ---------------------------------------------------------------------------
-# Health & basic routes
+# Mock data
+# ---------------------------------------------------------------------------
+
+MOCK_USER_ID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+MOCK_COMPANIES = [
+    {
+        "user_id": MOCK_USER_ID,
+        "company_name": "Banque Atlantique",
+        "type_institution": "banque",
+        "statement_count": 4,
+        "last_updated": "2024-01-15T10:00:00Z",
+    },
+    {
+        "user_id": MOCK_USER_ID,
+        "company_name": "PAMECAS",
+        "type_institution": "microfinance",
+        "statement_count": 4,
+        "last_updated": "2024-01-10T10:00:00Z",
+    },
+]
+
+MOCK_PERIODS = ["2023-12-31", "2022-12-31"]
+
+MOCK_EXTRACTED = {
+    "bank_name": "Banque Atlantique",
+    "name": "Banque Atlantique",
+    "fiscal_year": "2023",
+    "currency": "XOF",
+    "type_institution": "banque",
+    "total_assets": 1_000_000,
+    "total_equity": 120_000,
+    "total_liabilities": 880_000,
+    "cash_reserves_requirements": 50_000,
+    "due_from_banks": 30_000,
+    "investment_securities": 100_000,
+    "gross_loans": 600_000,
+    "loan_loss_provisions": 30_000,
+    "foreclosed_assets": 0,
+    "npls_mn": 20_000,
+    "deposits": 700_000,
+    "short_term_borrowings": 50_000,
+    "long_term_debt": 80_000,
+    "interbank_liabilities": 30_000,
+    "paid_in_capital": 60_000,
+    "reserves": 40_000,
+    "retained_earnings": 10_000,
+    "net_profit": 10_000,
+    "interest_income": 80_000,
+    "interest_expenses": 30_000,
+    "net_interest_income": 50_000,
+    "operating_income": 64_000,
+    "operating_expenses": 30_000,
+    "cost_of_risk": 10_000,
+    "provision_expenses": 10_000,
+    "income_tax": 5_000,
+    "net_income": 10_000,
+    "fees_commissions": 8_000,
+}
+
+
+# ---------------------------------------------------------------------------
+# Tests
 # ---------------------------------------------------------------------------
 
 class TestHealthAndRoutes:
-    def test_health(self, client):
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+    def test_root(self):
+        r = client.get("/")
+        assert r.status_code == 200
+        assert r.json()["version"] == "4.0.0"
 
-    def test_root(self, client):
-        resp = client.get("/")
-        assert resp.status_code == 200
-        assert "CAMELS" in resp.json()["message"]
-
-    def test_list_banks_empty(self, client):
-        resp = client.get("/banks")
-        assert resp.status_code == 200
-        assert resp.json()["total"] == 0
-
-    def test_get_bank_not_found(self, client):
-        resp = client.get("/banks/9999")
-        assert resp.status_code == 404
+    def test_health(self):
+        r = client.get("/health")
+        assert r.status_code == 200
+        assert r.json()["status"] == "ok"
 
 
-# ---------------------------------------------------------------------------
-# Bank CRUD
-# ---------------------------------------------------------------------------
+class TestCompanies:
+    @patch("main.list_companies_for_user", return_value=MOCK_COMPANIES)
+    def test_list_companies(self, mock_list):
+        r = client.get(f"/companies?user_id={MOCK_USER_ID}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["total"] == 2
+        assert data["companies"][0]["company_name"] == "Banque Atlantique"
 
-class TestBankCRUD:
-    def test_create_bank(self, client):
-        resp = client.post("/banks", json={
-            "name": "Test Bank",
-            "country": "Senegal",
-            "total_assets": 1000000.0,
-            "currency": "XOF"
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "Test Bank"
+    @patch("main.list_companies_for_user", return_value=[])
+    def test_list_companies_empty(self, mock_list):
+        r = client.get(f"/companies?user_id={MOCK_USER_ID}")
+        assert r.status_code == 200
+        assert r.json()["total"] == 0
 
-    def test_list_banks_after_create(self, client):
-        client.post("/banks", json={
-            "name": "Bank A",
-            "country": "Mali",
-            "total_assets": 500000.0,
-        })
-        resp = client.get("/banks")
-        assert resp.json()["total"] == 1
-
-    def test_get_bank_success(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Bank B",
-            "country": "Ivory Coast",
-            "total_assets": 750000.0,
-        })
-        bank_id = create_resp.json()["id"]
-        resp = client.get(f"/banks/{bank_id}")
-        assert resp.status_code == 200
+    def test_list_companies_no_user(self):
+        r = client.get("/companies")
+        assert r.status_code == 400
 
 
-# ---------------------------------------------------------------------------
-# File upload validation
-# ---------------------------------------------------------------------------
+class TestPeriods:
+    @patch("main.list_periods_for_company", return_value=MOCK_PERIODS)
+    def test_get_periods(self, mock_periods):
+        r = client.get(f"/companies/Banque%20Atlantique/periods?user_id={MOCK_USER_ID}")
+        assert r.status_code == 200
+        data = r.json()
+        assert "2023-12-31" in data["periods"]
 
-class TestUploadValidation:
-    def test_reject_unsupported_extension(self, client):
-        file_content = b"not a real file"
-        resp = client.post("/upload", files={
-            "file": ("test.exe", io.BytesIO(file_content), "application/octet-stream")
-        })
-        assert resp.status_code == 400
-        assert "not allowed" in resp.json()["detail"]
-
-    def test_reject_no_filename(self, client):
-        file_content = b"test"
-        resp = client.post("/upload", files={
-            "file": ("", io.BytesIO(file_content), "application/octet-stream")
-        })
-        # Empty filename should be rejected (400) or at least not succeed (not 200)
-        assert resp.status_code != 200
-
-    def test_accept_pdf(self, client):
-        file_content = b"%PDF-1.4 fake pdf content"
-        resp = client.post("/upload", files={
-            "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-        })
-        assert resp.status_code == 200
-        assert resp.json()["message"] == "File uploaded"
-
-    def test_accept_xlsx(self, client):
-        file_content = b"PK\x03\x04 fake xlsx"
-        resp = client.post("/upload", files={
-            "file": ("data.xlsx", io.BytesIO(file_content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        })
-        assert resp.status_code == 200
-
-    def test_accept_png(self, client):
-        file_content = b"\x89PNG fake image"
-        resp = client.post("/upload", files={
-            "file": ("scan.png", io.BytesIO(file_content), "image/png")
-        })
-        assert resp.status_code == 200
-
-    def test_reject_too_large(self, client):
-        with patch('main.MAX_UPLOAD_SIZE_MB', 0):
-            file_content = b"x" * 100
-            resp = client.post("/upload", files={
-                "file": ("big.pdf", io.BytesIO(file_content), "application/pdf")
-            })
-            assert resp.status_code == 413
+    @patch("main.list_periods_for_company", return_value=[])
+    def test_get_periods_not_found(self, mock_periods):
+        r = client.get(f"/companies/Unknown/periods?user_id={MOCK_USER_ID}")
+        assert r.status_code == 404
 
 
-# ---------------------------------------------------------------------------
-# Upload-and-analyze (job creation)
-# ---------------------------------------------------------------------------
+class TestAnalysis:
+    @patch("main.get_client")
+    @patch("main.extract_previous_period_data", return_value=None)
+    @patch("main.extract_statement_data", return_value=MOCK_EXTRACTED)
+    def test_analyze(self, mock_extract, mock_prev, mock_sb):
+        mock_table = MagicMock()
+        mock_sb.return_value.table.return_value = mock_table
+        mock_table.upsert.return_value.execute.return_value = MagicMock(data=[{}])
 
-class TestUploadAndAnalyze:
-    def test_creates_job(self, client):
-        with patch('main._job_executor') as mock_executor:
-            file_content = b"%PDF-1.4 test content"
-            resp = client.post("/upload-and-analyze", files={
-                "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-            })
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "job_id" in data
-            assert data["status"] == "processing"
-            # Verify the executor was called
-            mock_executor.submit.assert_called_once()
-
-    def test_job_status_not_found(self, client):
-        resp = client.get("/job/nonexistent-id")
-        assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Rate limiting
-# ---------------------------------------------------------------------------
-
-class TestRateLimiting:
-    def test_rate_limit_upload(self, client):
-        """Hit the upload endpoint many times rapidly to test rate limiting."""
-        file_content = b"%PDF-1.4 test"
-        responses = []
-        with patch('main._job_executor'):
-            for _ in range(25):
-                resp = client.post("/upload-and-analyze", files={
-                    "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-                })
-                responses.append(resp.status_code)
-
-        # At least some should be rate-limited (429)
-        assert 429 in responses, "Rate limiter should reject some requests"
-
-    def test_rate_limiter_allows_within_limit(self):
-        """Test RateLimiter class directly."""
-        from main import RateLimiter
-        limiter = RateLimiter(max_requests=3, window_seconds=60)
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is False  # 4th request blocked
-
-    def test_rate_limiter_different_keys(self):
-        from main import RateLimiter
-        limiter = RateLimiter(max_requests=1, window_seconds=60)
-        assert limiter.check("ip-1") is True
-        assert limiter.check("ip-2") is True  # Different key
-
-
-# ---------------------------------------------------------------------------
-# Calculate & rating routes
-# ---------------------------------------------------------------------------
-
-class TestCalculateRoutes:
-    def test_calculate_ratios(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Calc Bank",
-            "country": "Senegal",
-            "total_assets": 1000000.0,
-        })
-        bank_id = create_resp.json()["id"]
-
-        resp = client.get(f"/banks/{bank_id}/calculate")
-        assert resp.status_code == 200
-        assert "ratios" in resp.json()
-
-    def test_calculate_not_found(self, client):
-        resp = client.get("/banks/9999/calculate")
-        assert resp.status_code == 404
-
-    def test_rating_route(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Rate Bank",
-            "country": "Mali",
-            "total_assets": 1000000.0,
-        })
-        bank_id = create_resp.json()["id"]
-
-        resp = client.get(f"/banks/{bank_id}/rating")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "camels_ratings" in data
-        assert "composite_rating" in data
+        r = client.post(
+            f"/analyze?company_name=Banque%20Atlantique&period=2023-12-31&user_id={MOCK_USER_ID}"
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["message"] == "Analysis complete"
+        assert data["company_name"] == "Banque Atlantique"
+        assert "ratios" in data
+        assert "ratings" in data
         assert "analysis" in data
+        assert "key_metrics" in data
 
-    def test_rating_not_found(self, client):
-        resp = client.get("/banks/9999/rating")
-        assert resp.status_code == 404
+    @patch("main.extract_statement_data", side_effect=ValueError("Not found"))
+    def test_analyze_not_found(self, mock_extract):
+        r = client.post(
+            f"/analyze?company_name=NoSuchBank&period=2023-12-31&user_id={MOCK_USER_ID}"
+        )
+        assert r.status_code == 404
+
+    @patch("main.get_client")
+    def test_list_analyses(self, mock_sb):
+        mock_result = MagicMock()
+        mock_result.data = [
+            {"id": "xxx", "company_name": "Test", "period": "2023-12-31",
+             "composite_rating": {"composite_rating": 2}, "created_at": "2024-01-01"}
+        ]
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value.order.return_value.execute.return_value = mock_result
+
+        r = client.get(f"/analyses?user_id={MOCK_USER_ID}")
+        assert r.status_code == 200
+        assert r.json()["total"] == 1
+
+    @patch("main.get_client")
+    def test_get_analysis(self, mock_sb):
+        mock_result = MagicMock()
+        mock_result.data = [{"id": "xxx", "company_name": "Test", "period": "2023-12-31"}]
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+
+        r = client.get(f"/analyses/Test/2023-12-31?user_id={MOCK_USER_ID}")
+        assert r.status_code == 200
+
+    @patch("main.get_client")
+    def test_get_analysis_not_found(self, mock_sb):
+        mock_result = MagicMock()
+        mock_result.data = []
+        mock_sb.return_value.table.return_value.select.return_value.eq.return_value.eq.return_value.eq.return_value.execute.return_value = mock_result
+
+        r = client.get(f"/analyses/Missing/2099-12-31?user_id={MOCK_USER_ID}")
+        assert r.status_code == 404
+
+
+class TestAnalysisDataIntegrity:
+    """Verify the full analysis response has the correct structure."""
+
+    @patch("main.get_client")
+    @patch("main.extract_previous_period_data", return_value=None)
+    @patch("main.extract_statement_data", return_value=MOCK_EXTRACTED)
+    def test_full_response_structure(self, mock_extract, mock_prev, mock_sb):
+        mock_table = MagicMock()
+        mock_sb.return_value.table.return_value = mock_table
+        mock_table.upsert.return_value.execute.return_value = MagicMock(data=[{}])
+
+        r = client.post(
+            f"/analyze?company_name=Banque%20Atlantique&period=2023-12-31&user_id={MOCK_USER_ID}"
+        )
+        data = r.json()
+
+        # Top-level keys
+        assert "ratios" in data
+        assert "ratings" in data
+        assert "analysis" in data
+        assert "key_metrics" in data
+
+        # Ratings structure
+        for component in ("capital", "asset_quality", "management", "earnings", "liquidity"):
+            assert component in data["ratings"]
+            assert "rating" in data["ratings"][component]
+            assert "status" in data["ratings"][component]
+        assert "composite" in data["ratings"]
+
+        # Analysis paragraphs
+        for component in ("capital", "asset_quality", "management", "earnings", "liquidity", "composite"):
+            assert component in data["analysis"]
+            assert len(data["analysis"][component]) > 0
+
+        # Key metrics
+        km = data["key_metrics"]
+        assert km["total_assets"] == 1_000_000
+        assert km["total_equity"] == 120_000
