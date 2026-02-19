@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { listCompanies, listPeriods, analyzeCompany } from '../services/api';
 
-export function useAnalyzer() {
+export function useAnalyzer(userId) {
   const [companies, setCompanies] = useState([]);
   const [selectedCompany, setSelectedCompany] = useState(null);
   const [periods, setPeriods] = useState([]);
@@ -13,12 +13,13 @@ export function useAnalyzer() {
 
   // Fetch companies on mount
   useEffect(() => {
+    if (!userId) return;
     setLoadingCompanies(true);
-    listCompanies()
+    listCompanies(userId)
       .then((data) => setCompanies(data.companies || []))
       .catch((err) => setError('Failed to load companies: ' + err.message))
       .finally(() => setLoadingCompanies(false));
-  }, []);
+  }, [userId]);
 
   // Fetch periods when company changes
   useEffect(() => {
@@ -32,10 +33,10 @@ export function useAnalyzer() {
     setResult(null);
     setError(null);
 
-    listPeriods(selectedCompany.company_name)
+    listPeriods(selectedCompany.company_name, userId)
       .then((data) => setPeriods(data.periods || []))
       .catch((err) => setError('Failed to load periods: ' + err.message));
-  }, [selectedCompany]);
+  }, [selectedCompany, userId]);
 
   const handleCompanyChange = (companyName) => {
     const company = companies.find((c) => c.company_name === companyName) || null;
@@ -59,7 +60,7 @@ export function useAnalyzer() {
     setResult(null);
 
     try {
-      const data = await analyzeCompany(selectedCompany.company_name, selectedPeriod);
+      const data = await analyzeCompany(selectedCompany.company_name, selectedPeriod, userId);
       setResult(data);
     } catch (err) {
       const msg = err.response?.data?.detail || err.message;

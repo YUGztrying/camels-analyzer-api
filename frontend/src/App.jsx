@@ -1,5 +1,7 @@
 import './App.css';
+import { useAuth } from './contexts/AuthContext';
 import { useAnalyzer } from './hooks/useAnalyzer';
+import Auth from './components/Auth';
 import ErrorBoundary from './components/ErrorBoundary';
 import StatementSelector from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
@@ -8,11 +10,25 @@ import CAMELSSection from './components/CAMELSSection';
 import MetricsGrid from './components/MetricsGrid';
 
 function App() {
+  const { user, loading: authLoading, signOut } = useAuth();
+
+  if (authLoading) {
+    return <LoadingSpinner progress="Loading..." />;
+  }
+
+  if (!user) {
+    return <Auth />;
+  }
+
+  return <Dashboard user={user} signOut={signOut} />;
+}
+
+function Dashboard({ user, signOut }) {
   const {
     companies, selectedCompany, periods, selectedPeriod,
     loading, loadingCompanies, result, error,
     handleCompanyChange, handlePeriodChange, handleAnalyze,
-  } = useAnalyzer();
+  } = useAnalyzer(user.id);
 
   const ratings = result?.ratings;
   const analysis = result?.analysis;
@@ -21,8 +37,16 @@ function App() {
   return (
     <ErrorBoundary>
       <div className="App">
-        <h1>CAMELS Analyzer</h1>
-        <p className="subtitle">Automated bank financial statement analysis</p>
+        <div className="app-header">
+          <div>
+            <h1>CAMELS Analyzer</h1>
+            <p className="subtitle">Automated bank financial statement analysis</p>
+          </div>
+          <div className="user-bar">
+            <span className="user-email">{user.email}</span>
+            <button className="sign-out-btn" onClick={signOut}>Sign Out</button>
+          </div>
+        </div>
 
         <StatementSelector
           companies={companies}
