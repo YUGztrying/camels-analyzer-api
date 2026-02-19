@@ -2,6 +2,8 @@
 CAMELS Calculator — computes all ratios per the analyst cheat sheet
 and generates a short paragraph analysis for each CAMELS component.
 
+All functions work with plain dicts (from Supabase rows) — no ORM objects.
+
 Formulas
 --------
 C — Capital Adequacy
@@ -19,16 +21,11 @@ M — Management (Efficiency)
 E — Earnings
   ROAA                          = Net Profit / Average Total Assets
   ROAE                          = Net Profit / Average Shareholders' Equity
-  Net Interest Income / Avg Assets  = (Interest Income + Interest Expenses) / Avg Total Assets
-  Non-Interest Income / Avg Assets  = (Fees & Commissions + Net Sales + Dividends + FVTPL Changes
-                                       + Securitization Gains + Provisions No Longer Required
-                                       + Share in Profit of Associates + Other Revenues
-                                       + Gain on Acquisition of Subsidiaries) / Avg Total Assets
-  Operating Expenses / Avg Assets   = (Wages & Salaries + Other OpEx + Intangible Amortization
-                                       + Fixed Asset Depreciation) / Avg Total Assets
+  Net Interest Income / Avg Assets  = Net Interest Income / Avg Total Assets
+  Non-Interest Income / Avg Assets  = (Fees & Commissions + ...) / Avg Total Assets
+  Operating Expenses / Avg Assets   = (Wages + ...) / Avg Total Assets
   Tax Expenses / Avg Assets         = Tax Expenses / Avg Total Assets
-  Other Income / Avg Assets         = (Provisions Formed + Impairment in Financial Assets
-                                       + Foreign Currency Exchange) / Avg Total Assets
+  Other Income / Avg Assets         = (Provisions Formed + Impairment + FX) / Avg Total Assets
 
 L — Liquidity
   Liquid Assets / Total Assets = (Cash & Deposits with Banks + Investment Securities) / Total Assets
@@ -57,9 +54,11 @@ def _calculate_average(current, previous=None):
     return current if current else 0
 
 
-def _get(obj, attr, default=0):
-    """Safely read an attribute, returning *default* when None."""
-    val = getattr(obj, attr, None)
+def _get(data, key, default=0):
+    """Safely read a key from a dict, returning *default* when None."""
+    if data is None:
+        return default
+    val = data.get(key)
     return val if val is not None else default
 
 
@@ -78,164 +77,184 @@ def _rating_label(rating):
 # Main calculation entry point
 # ---------------------------------------------------------------------------
 
-def calculate_all_ratios(bank, prev_bank=None):
+def calculate_all_ratios(statement: dict, prev_statement: dict = None) -> dict:
     """
-    Compute every CAMELS ratio on *bank* (a BankDB instance) and write the
-    results back onto the same object.  Optionally uses *prev_bank* for
-    averages.  Returns the mutated bank.
+    Compute every CAMELS ratio from a financial statement dict.
+    Optionally uses *prev_statement* for period averages.
+    Returns a new dict of computed ratios — does NOT mutate the input.
     """
 
     # Averages (current + previous period)
-    avg_assets = _calculate_average(_get(bank, 'total_assets'), _get(prev_bank, 'total_assets') if prev_bank else None)
-    avg_equity = _calculate_average(_get(bank, 'total_equity'), _get(prev_bank, 'total_equity') if prev_bank else None)
-    avg_gross_loans = _calculate_average(_get(bank, 'gross_loans'), _get(prev_bank, 'gross_loans') if prev_bank else None)
+    avg_assets = _calculate_average(
+        _get(statement, 'total_assets'),
+        _get(prev_statement, 'total_assets') if prev_statement else None,
+    )
+    avg_equity = _calculate_average(
+        _get(statement, 'total_equity'),
+        _get(prev_statement, 'total_equity') if prev_statement else None,
+    )
+    avg_gross_loans = _calculate_average(
+        _get(statement, 'gross_loans'),
+        _get(prev_statement, 'gross_loans') if prev_statement else None,
+    )
+
+    ratios = {}
 
     # ===== C — CAPITAL ADEQUACY =====
-    bank.equity_assets = _safe_divide(_get(bank, 'total_equity'), _get(bank, 'total_assets'))
+    ratios['equity_assets'] = _safe_divide(
+        _get(statement, 'total_equity'), _get(statement, 'total_assets'),
+    )
 
-    total_debt = _get(bank, 'short_term_borrowings') + _get(bank, 'long_term_debt')
-    bank.debt_assets = _safe_divide(total_debt, _get(bank, 'total_assets')) if total_debt else None
+    total_debt = _get(statement, 'short_term_borrowings') + _get(statement, 'long_term_debt')
+    ratios['debt_assets'] = _safe_divide(total_debt, _get(statement, 'total_assets')) if total_debt else None
 
     # ===== A — ASSET QUALITY =====
-    npls = _get(bank, 'npls_mn')
-    llp = abs(_get(bank, 'loan_loss_provisions'))  # ECL — stored negative sometimes
-    ecl = _get(bank, 'provision_expenses')  # income-statement ECL charge
+    npls = _get(statement, 'npls_mn')
+    llp = abs(_get(statement, 'loan_loss_provisions'))  # ECL — stored negative sometimes
+    ecl = _get(statement, 'provision_expenses')  # income-statement ECL charge
 
-    bank.npl_ratio = _safe_divide(npls, _get(bank, 'gross_loans'))
-    bank.coverage_ratio = _safe_divide(llp, npls) if npls else None
-    bank.cost_of_risk_avg_assets = _safe_divide(ecl, avg_assets) if ecl else None
+    ratios['npl_ratio'] = _safe_divide(npls, _get(statement, 'gross_loans'))
+    ratios['coverage_ratio'] = _safe_divide(llp, npls) if npls else None
+    ratios['cost_of_risk_avg_assets'] = _safe_divide(ecl, avg_assets) if ecl else None
 
-    # Extra legacy ratios
-    foreclosed = _get(bank, 'foreclosed_assets')
+    # Extra asset quality ratios
+    foreclosed = _get(statement, 'foreclosed_assets')
     problem_assets = npls + foreclosed
-    bank.problem_assets_mn = problem_assets if problem_assets else None
+    ratios['problem_assets_mn'] = problem_assets if problem_assets else None
 
-    llr = _get(bank, 'llr_mn')
+    llr = _get(statement, 'llr_mn')
     if llr == 0 and llp != 0:
         llr = llp
 
-    npa_denom = _get(bank, 'gross_loans') + foreclosed
-    bank.npa_ratio = _safe_divide(problem_assets, npa_denom)
-    bank.llr_avg_loan = _safe_divide(llr, avg_gross_loans)
-    bank.oler = _safe_divide(problem_assets - llr, _get(bank, 'total_equity'))
+    npa_denom = _get(statement, 'gross_loans') + foreclosed
+    ratios['npa_ratio'] = _safe_divide(problem_assets, npa_denom)
+    ratios['llr_avg_loan'] = _safe_divide(llr, avg_gross_loans)
+    ratios['oler'] = _safe_divide(problem_assets - llr, _get(statement, 'total_equity'))
 
     # ===== M — MANAGEMENT (Efficiency) =====
-    op_income = _get(bank, 'operating_income')
+    op_income = _get(statement, 'operating_income')
     if not op_income:
-        # Derive operating income = net interest income + non-interest income
-        nii = _get(bank, 'net_interest_income')
-        non_ii = _get(bank, 'non_interest_income_commissions') + _get(bank, 'net_income_investment') + _get(bank, 'other_net_income')
+        nii = _get(statement, 'net_interest_income')
+        non_ii = (
+            _get(statement, 'non_interest_income_commissions')
+            + _get(statement, 'net_income_investment')
+            + _get(statement, 'other_net_income')
+        )
         # Also try granular non-interest income
         granular_non_ii = sum([
-            _get(bank, 'fees_commissions'),
-            _get(bank, 'net_sales'),
-            _get(bank, 'dividends'),
-            _get(bank, 'fvtpl_changes'),
-            _get(bank, 'securitization_gains'),
-            _get(bank, 'provisions_no_longer_required'),
-            _get(bank, 'share_profit_associates'),
-            _get(bank, 'other_revenues'),
-            _get(bank, 'gain_acquisition_subsidiaries'),
+            _get(statement, 'fees_commissions'),
+            _get(statement, 'net_sales'),
+            _get(statement, 'dividends'),
+            _get(statement, 'fvtpl_changes'),
+            _get(statement, 'securitization_gains'),
+            _get(statement, 'provisions_no_longer_required'),
+            _get(statement, 'share_profit_associates'),
+            _get(statement, 'other_revenues'),
+            _get(statement, 'gain_acquisition_subsidiaries'),
         ])
         if granular_non_ii:
             non_ii = granular_non_ii
         op_income = nii + non_ii if (nii or non_ii) else 0
 
-    bank.cost_to_income = _safe_divide(_get(bank, 'operating_expenses'), op_income) if op_income else None
+    ratios['cost_to_income'] = _safe_divide(_get(statement, 'operating_expenses'), op_income) if op_income else None
 
     # ===== E — EARNINGS =====
-    net_profit = _get(bank, 'net_income') or _get(bank, 'net_profit')
+    net_profit = _get(statement, 'net_income') or _get(statement, 'net_profit')
 
-    # ROAA & ROAE — direct formula
-    bank.roaa = _safe_divide(net_profit, avg_assets)
-    bank.roae = _safe_divide(net_profit, avg_equity)
+    ratios['roaa'] = _safe_divide(net_profit, avg_assets)
+    ratios['roae'] = _safe_divide(net_profit, avg_equity)
 
     # Net Interest Income / Avg Assets
-    # Note: interest_expenses is extracted as a positive number, so we subtract
-    # to get net interest income. Falls back to net_interest_income if available.
-    nii_val = _get(bank, 'net_interest_income')
+    nii_val = _get(statement, 'net_interest_income')
     if not nii_val:
-        ii = _get(bank, 'interest_income')
-        ie = _get(bank, 'interest_expenses')
+        ii = _get(statement, 'interest_income')
+        ie = _get(statement, 'interest_expenses')
         nii_val = ii - ie if (ii or ie) else 0
-    bank.net_interest_income_avg_assets = _safe_divide(nii_val, avg_assets) if nii_val else None
+    ratios['net_interest_income_avg_assets'] = _safe_divide(nii_val, avg_assets) if nii_val else None
 
     # Non-Interest Income / Avg Assets (granular)
     non_ii_total = sum([
-        _get(bank, 'fees_commissions'),
-        _get(bank, 'net_sales'),
-        _get(bank, 'dividends'),
-        _get(bank, 'fvtpl_changes'),
-        _get(bank, 'securitization_gains'),
-        _get(bank, 'provisions_no_longer_required'),
-        _get(bank, 'share_profit_associates'),
-        _get(bank, 'other_revenues'),
-        _get(bank, 'gain_acquisition_subsidiaries'),
+        _get(statement, 'fees_commissions'),
+        _get(statement, 'net_sales'),
+        _get(statement, 'dividends'),
+        _get(statement, 'fvtpl_changes'),
+        _get(statement, 'securitization_gains'),
+        _get(statement, 'provisions_no_longer_required'),
+        _get(statement, 'share_profit_associates'),
+        _get(statement, 'other_revenues'),
+        _get(statement, 'gain_acquisition_subsidiaries'),
     ])
     if not non_ii_total:
-        # Fallback to aggregate fields
-        non_ii_total = _get(bank, 'non_interest_income_commissions') + _get(bank, 'net_income_investment') + _get(bank, 'other_net_income')
-    bank.non_interest_income_avg_assets = _safe_divide(non_ii_total, avg_assets) if non_ii_total else None
+        non_ii_total = (
+            _get(statement, 'non_interest_income_commissions')
+            + _get(statement, 'net_income_investment')
+            + _get(statement, 'other_net_income')
+        )
+    ratios['non_interest_income_avg_assets'] = _safe_divide(non_ii_total, avg_assets) if non_ii_total else None
 
     # Operating Expenses / Avg Assets (granular)
     opex_granular = sum([
-        _get(bank, 'wages_salaries'),
-        _get(bank, 'other_opex'),
-        _get(bank, 'intangible_amortization'),
-        _get(bank, 'fixed_asset_depreciation'),
+        _get(statement, 'wages_salaries'),
+        _get(statement, 'other_opex'),
+        _get(statement, 'intangible_amortization'),
+        _get(statement, 'fixed_asset_depreciation'),
     ])
-    opex_val = opex_granular if opex_granular else _get(bank, 'operating_expenses')
-    bank.opex_avg_assets = _safe_divide(opex_val, avg_assets)
+    opex_val = opex_granular if opex_granular else _get(statement, 'operating_expenses')
+    ratios['opex_avg_assets'] = _safe_divide(opex_val, avg_assets)
 
     # Tax Expenses / Avg Assets
-    bank.tax_expenses_avg_assets = _safe_divide(_get(bank, 'income_tax'), avg_assets)
+    ratios['tax_expenses_avg_assets'] = _safe_divide(_get(statement, 'income_tax'), avg_assets)
 
     # Other Income / Avg Assets
     other_income = sum([
-        _get(bank, 'provisions_formed'),
-        _get(bank, 'impairment_financial_assets'),
-        _get(bank, 'fx_exchange'),
+        _get(statement, 'provisions_formed'),
+        _get(statement, 'impairment_financial_assets'),
+        _get(statement, 'fx_exchange'),
     ])
-    bank.other_income_avg_assets = _safe_divide(other_income, avg_assets) if other_income else None
+    ratios['other_income_avg_assets'] = _safe_divide(other_income, avg_assets) if other_income else None
 
-    # Legacy DuPont fields (kept for backward compatibility)
-    bank.net_interest_margin = _safe_divide(_get(bank, 'net_interest_income'), avg_assets)
-    bank.net_interest_income_assets = bank.net_interest_margin
-    bank.non_interest_income_assets = bank.non_interest_income_avg_assets
-    bank.non_interest_income_assets_dupont = bank.non_interest_income_avg_assets
-    bank.opex_assets = bank.opex_avg_assets
-    bank.opex_assets_dupont = bank.opex_avg_assets
-    bank.provision_expenses_assets = _safe_divide(_get(bank, 'provision_expenses'), avg_assets)
-    bank.non_op_assets = _safe_divide(_get(bank, 'non_operating_profit_loss'), avg_assets)
-    bank.tax_expenses_assets = bank.tax_expenses_avg_assets
-    bank.assets_equity = _safe_divide(avg_assets, avg_equity)
-
-    yield_on_assets = _safe_divide(_get(bank, 'interest_income'), _get(bank, 'total_assets'))
-    cost_of_liabs = _safe_divide(_get(bank, 'interest_expenses'), _get(bank, 'total_liabilities'))
+    # Additional ratios
+    ratios['net_interest_margin'] = _safe_divide(_get(statement, 'net_interest_income'), avg_assets)
+    ratios['net_interest_spread'] = None
+    yield_on_assets = _safe_divide(_get(statement, 'interest_income'), _get(statement, 'total_assets'))
+    cost_of_liabs = _safe_divide(_get(statement, 'interest_expenses'), _get(statement, 'total_liabilities'))
     spread = (yield_on_assets or 0) - (cost_of_liabs or 0)
-    bank.net_interest_spread = spread if (yield_on_assets is not None or cost_of_liabs is not None) else None
-    bank.interest_earning_assets_yield = _safe_divide(
-        _get(bank, 'interest_income'),
-        _get(bank, 'gross_loans') + _get(bank, 'investment_securities'))
-    bank.cost_of_funds = _safe_divide(_get(bank, 'interest_expenses'), _get(bank, 'total_liabilities'))
+    if yield_on_assets is not None or cost_of_liabs is not None:
+        ratios['net_interest_spread'] = spread
+
+    ratios['interest_earning_assets_yield'] = _safe_divide(
+        _get(statement, 'interest_income'),
+        _get(statement, 'gross_loans') + _get(statement, 'investment_securities'),
+    )
+    ratios['cost_of_funds'] = _safe_divide(
+        _get(statement, 'interest_expenses'), _get(statement, 'total_liabilities'),
+    )
+    ratios['assets_equity'] = _safe_divide(avg_assets, avg_equity)
 
     # ===== L — LIQUIDITY =====
-    liquid_assets = _get(bank, 'cash_reserves_requirements') + _get(bank, 'due_from_banks') + _get(bank, 'investment_securities')
-    bank.liquid_assets_total_assets = _safe_divide(liquid_assets, _get(bank, 'total_assets'))
-    bank.liquid_assets_assets = bank.liquid_assets_total_assets  # legacy alias
-    bank.cash_reserves_assets = _safe_divide(_get(bank, 'cash_reserves_requirements'), _get(bank, 'total_assets'))
-    bank.gross_loans_deposits = _safe_divide(_get(bank, 'gross_loans'), _get(bank, 'deposits'))
+    liquid_assets = (
+        _get(statement, 'cash_reserves_requirements')
+        + _get(statement, 'due_from_banks')
+        + _get(statement, 'investment_securities')
+    )
+    ratios['liquid_assets_total_assets'] = _safe_divide(liquid_assets, _get(statement, 'total_assets'))
+    ratios['cash_reserves_assets'] = _safe_divide(
+        _get(statement, 'cash_reserves_requirements'), _get(statement, 'total_assets'),
+    )
+    ratios['gross_loans_deposits'] = _safe_divide(
+        _get(statement, 'gross_loans'), _get(statement, 'deposits'),
+    )
 
-    return bank
+    return ratios
 
 
 # ---------------------------------------------------------------------------
-# Rating functions (1 = Strong … 5 = Unsatisfactory)
+# Rating functions (1 = Strong ... 5 = Unsatisfactory)
 # ---------------------------------------------------------------------------
 
-def rate_capital(bank):
+def rate_capital(ratios: dict):
     """Rate C — Capital Adequacy using Equity/Assets."""
-    ratio = getattr(bank, 'equity_assets', None)
+    ratio = ratios.get('equity_assets')
     if ratio is None:
         return {"rating": None, "status": "Insufficient data", "ratios": {}}
 
@@ -255,14 +274,14 @@ def rate_capital(bank):
         "status": _rating_label(r),
         "ratios": {
             "equity_assets": ratio,
-            "debt_assets": getattr(bank, 'debt_assets', None),
+            "debt_assets": ratios.get('debt_assets'),
         },
     }
 
 
-def rate_asset_quality(bank):
+def rate_asset_quality(ratios: dict):
     """Rate A — Asset Quality using NPL ratio."""
-    npl = getattr(bank, 'npl_ratio', None)
+    npl = ratios.get('npl_ratio')
     if npl is None:
         return {"rating": None, "status": "Insufficient data", "ratios": {}}
 
@@ -282,15 +301,15 @@ def rate_asset_quality(bank):
         "status": _rating_label(r),
         "ratios": {
             "npl_ratio": npl,
-            "coverage_ratio": getattr(bank, 'coverage_ratio', None),
-            "cost_of_risk_avg_assets": getattr(bank, 'cost_of_risk_avg_assets', None),
+            "coverage_ratio": ratios.get('coverage_ratio'),
+            "cost_of_risk_avg_assets": ratios.get('cost_of_risk_avg_assets'),
         },
     }
 
 
-def rate_management(bank):
+def rate_management(ratios: dict):
     """Rate M — Management Efficiency using Cost-to-Income."""
-    cti = getattr(bank, 'cost_to_income', None)
+    cti = ratios.get('cost_to_income')
     if cti is None:
         return {"rating": None, "status": "Insufficient data", "ratios": {}}
 
@@ -314,9 +333,9 @@ def rate_management(bank):
     }
 
 
-def rate_earnings(bank):
+def rate_earnings(ratios: dict):
     """Rate E — Earnings using ROAE."""
-    roae = getattr(bank, 'roae', None)
+    roae = ratios.get('roae')
     if roae is None:
         return {"rating": None, "status": "Insufficient data", "ratios": {}}
 
@@ -335,20 +354,20 @@ def rate_earnings(bank):
         "rating": r,
         "status": _rating_label(r),
         "ratios": {
-            "roaa": getattr(bank, 'roaa', None),
+            "roaa": ratios.get('roaa'),
             "roae": roae,
-            "net_interest_income_avg_assets": getattr(bank, 'net_interest_income_avg_assets', None),
-            "non_interest_income_avg_assets": getattr(bank, 'non_interest_income_avg_assets', None),
-            "opex_avg_assets": getattr(bank, 'opex_avg_assets', None),
-            "tax_expenses_avg_assets": getattr(bank, 'tax_expenses_avg_assets', None),
-            "other_income_avg_assets": getattr(bank, 'other_income_avg_assets', None),
+            "net_interest_income_avg_assets": ratios.get('net_interest_income_avg_assets'),
+            "non_interest_income_avg_assets": ratios.get('non_interest_income_avg_assets'),
+            "opex_avg_assets": ratios.get('opex_avg_assets'),
+            "tax_expenses_avg_assets": ratios.get('tax_expenses_avg_assets'),
+            "other_income_avg_assets": ratios.get('other_income_avg_assets'),
         },
     }
 
 
-def rate_liquidity(bank):
+def rate_liquidity(ratios: dict):
     """Rate L — Liquidity using Liquid Assets / Total Assets."""
-    ratio = getattr(bank, 'liquid_assets_total_assets', None)
+    ratio = ratios.get('liquid_assets_total_assets')
     if ratio is None:
         return {"rating": None, "status": "Insufficient data", "ratios": {}}
 
@@ -395,21 +414,20 @@ def get_composite_rating(capital, asset, management, earnings, liquidity):
 # Paragraph analysis generation
 # ---------------------------------------------------------------------------
 
-def generate_analysis_paragraphs(bank, ratings):
+def generate_analysis_paragraphs(statement: dict, ratios: dict, ratings: dict) -> dict:
     """
     Generate a short analyst-style paragraph for each CAMELS component
-    and a composite summary.  Writes directly onto *bank* object and
-    returns a dict of the paragraphs.
+    and a composite summary.  Returns a dict of paragraphs — no mutation.
     """
-    name = getattr(bank, 'bank_name', 'The bank')
-    year = getattr(bank, 'fiscal_year', 'the period')
+    name = statement.get('bank_name') or statement.get('name', 'The bank')
+    year = statement.get('fiscal_year', 'the period')
 
     paragraphs = {}
 
     # --- C: Capital Adequacy ---
     c = ratings.get("capital", {})
-    eq_a = getattr(bank, 'equity_assets', None)
-    d_a = getattr(bank, 'debt_assets', None)
+    eq_a = ratios.get('equity_assets')
+    d_a = ratios.get('debt_assets')
     c_text = f"Capital Adequacy — Rating: {c.get('rating', 'N/A')} ({c.get('status', 'N/A')}). "
     if eq_a is not None:
         c_text += f"{name} reports an Equity-to-Assets ratio of {_pct(eq_a)}, "
@@ -428,13 +446,12 @@ def generate_analysis_paragraphs(bank, ratings):
     else:
         c_text += "Debt-to-Assets data was not available for this period."
     paragraphs["capital"] = c_text
-    bank.analysis_capital = c_text
 
     # --- A: Asset Quality ---
     a = ratings.get("asset_quality", {})
-    npl = getattr(bank, 'npl_ratio', None)
-    cov = getattr(bank, 'coverage_ratio', None)
-    cor = getattr(bank, 'cost_of_risk_avg_assets', None)
+    npl = ratios.get('npl_ratio')
+    cov = ratios.get('coverage_ratio')
+    cor = ratios.get('cost_of_risk_avg_assets')
     a_text = f"Asset Quality — Rating: {a.get('rating', 'N/A')} ({a.get('status', 'N/A')}). "
     if npl is not None:
         a_text += f"The NPL ratio is {_pct(npl)}, "
@@ -453,11 +470,10 @@ def generate_analysis_paragraphs(bank, ratings):
     if cor is not None:
         a_text += f"Cost of risk relative to average assets is {_pct(cor)}."
     paragraphs["asset_quality"] = a_text
-    bank.analysis_asset_quality = a_text
 
     # --- M: Management ---
     m = ratings.get("management", {})
-    cti = getattr(bank, 'cost_to_income', None)
+    cti = ratios.get('cost_to_income')
     m_text = f"Management (Efficiency) — Rating: {m.get('rating', 'N/A')} ({m.get('status', 'N/A')}). "
     if cti is not None:
         m_text += f"The Cost-to-Income ratio is {_pct(cti)}, "
@@ -470,16 +486,15 @@ def generate_analysis_paragraphs(bank, ratings):
     else:
         m_text += "Cost-to-Income data was not available; management efficiency could not be assessed quantitatively."
     paragraphs["management"] = m_text
-    bank.analysis_management = m_text
 
     # --- E: Earnings ---
     e = ratings.get("earnings", {})
-    roaa = getattr(bank, 'roaa', None)
-    roae = getattr(bank, 'roae', None)
-    nii_a = getattr(bank, 'net_interest_income_avg_assets', None)
-    nonii_a = getattr(bank, 'non_interest_income_avg_assets', None)
-    opex_a = getattr(bank, 'opex_avg_assets', None)
-    tax_a = getattr(bank, 'tax_expenses_avg_assets', None)
+    roaa = ratios.get('roaa')
+    roae = ratios.get('roae')
+    nii_a = ratios.get('net_interest_income_avg_assets')
+    nonii_a = ratios.get('non_interest_income_avg_assets')
+    opex_a = ratios.get('opex_avg_assets')
+    tax_a = ratios.get('tax_expenses_avg_assets')
     e_text = f"Earnings — Rating: {e.get('rating', 'N/A')} ({e.get('status', 'N/A')}). "
     if roaa is not None:
         e_text += f"ROAA stands at {_pct(roaa)} "
@@ -504,12 +519,11 @@ def generate_analysis_paragraphs(bank, ratings):
     if tax_a is not None:
         e_text += f"Tax expense accounts for {_pct(tax_a)} of average assets."
     paragraphs["earnings"] = e_text
-    bank.analysis_earnings = e_text
 
     # --- L: Liquidity ---
-    l = ratings.get("liquidity", {})
-    la_ta = getattr(bank, 'liquid_assets_total_assets', None)
-    l_text = f"Liquidity — Rating: {l.get('rating', 'N/A')} ({l.get('status', 'N/A')}). "
+    l_r = ratings.get("liquidity", {})
+    la_ta = ratios.get('liquid_assets_total_assets')
+    l_text = f"Liquidity — Rating: {l_r.get('rating', 'N/A')} ({l_r.get('status', 'N/A')}). "
     if la_ta is not None:
         l_text += f"Liquid assets (cash, deposits with banks, and investment securities) represent {_pct(la_ta)} of total assets. "
         if la_ta >= 0.30:
@@ -518,11 +532,10 @@ def generate_analysis_paragraphs(bank, ratings):
             l_text += "This is an adequate level, though a sudden deposit outflow or market stress event could tighten the position. "
         else:
             l_text += "This low level raises concerns about the bank's ability to handle stress scenarios or sudden liquidity demands. "
-    ld = getattr(bank, 'gross_loans_deposits', None)
+    ld = ratios.get('gross_loans_deposits')
     if ld is not None:
         l_text += f"The Loans-to-Deposits ratio is {_pct(ld)}."
     paragraphs["liquidity"] = l_text
-    bank.analysis_liquidity = l_text
 
     # --- Composite ---
     comp = ratings.get("composite", {})
@@ -540,6 +553,39 @@ def generate_analysis_paragraphs(bank, ratings):
     else:
         comp_text += "insufficient data was available to draw a definitive conclusion. Additional financial disclosures are needed."
     paragraphs["composite"] = comp_text
-    bank.analysis_composite = comp_text
 
     return paragraphs
+
+
+# ---------------------------------------------------------------------------
+# Convenience: run the full analysis pipeline
+# ---------------------------------------------------------------------------
+
+def run_full_analysis(statement: dict, prev_statement: dict = None) -> dict:
+    """
+    Run the complete CAMELS analysis pipeline on a financial statement dict.
+    Returns a dict with ratios, ratings, and analysis paragraphs.
+    """
+    ratios = calculate_all_ratios(statement, prev_statement)
+
+    ratings = {
+        "capital": rate_capital(ratios),
+        "asset_quality": rate_asset_quality(ratios),
+        "management": rate_management(ratios),
+        "earnings": rate_earnings(ratios),
+        "liquidity": rate_liquidity(ratios),
+    }
+    composite = get_composite_rating(
+        ratings["capital"], ratings["asset_quality"],
+        ratings["management"], ratings["earnings"], ratings["liquidity"],
+    )
+    ratings["composite"] = composite
+
+    # Merge company name into statement for paragraph generation
+    paragraphs = generate_analysis_paragraphs(statement, ratios, ratings)
+
+    return {
+        "ratios": ratios,
+        "ratings": ratings,
+        "analysis": paragraphs,
+    }

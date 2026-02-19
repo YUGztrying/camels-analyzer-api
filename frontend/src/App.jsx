@@ -1,7 +1,7 @@
 import './App.css';
 import { useAnalyzer } from './hooks/useAnalyzer';
 import ErrorBoundary from './components/ErrorBoundary';
-import FileUpload from './components/FileUpload';
+import StatementSelector from './components/FileUpload';
 import LoadingSpinner from './components/LoadingSpinner';
 import CompositeRating from './components/CompositeRating';
 import CAMELSSection from './components/CAMELSSection';
@@ -9,13 +9,16 @@ import { BalanceSheet, IncomeStatement } from './components/FinancialStatement';
 import MetricsGrid from './components/MetricsGrid';
 
 function App() {
-  const { file, loading, progress, result, error, handleFileChange, handleUpload } = useAnalyzer();
+  const {
+    companies, selectedCompany, statements, selectedStatement,
+    loading, loadingCompanies, result, error,
+    handleCompanyChange, handleStatementChange, handleAnalyze,
+  } = useAnalyzer();
 
-  const bank = result?.bank;
-  const ratings = result?.detailed_ratings;
+  const stmt = result?.statement;
+  const ratings = result?.ratings;
   const analysis = result?.analysis;
   const km = result?.key_metrics;
-  const warnings = result?.bank?._validation_warnings;
 
   return (
     <ErrorBoundary>
@@ -23,33 +26,29 @@ function App() {
         <h1>CAMELS Analyzer</h1>
         <p className="subtitle">Automated bank financial statement analysis</p>
 
-        <FileUpload
-          onFileChange={handleFileChange}
-          onUpload={handleUpload}
+        <StatementSelector
+          companies={companies}
+          selectedCompany={selectedCompany}
+          statements={statements}
+          selectedStatement={selectedStatement}
+          loadingCompanies={loadingCompanies}
           loading={loading}
-          file={file}
+          onCompanyChange={handleCompanyChange}
+          onStatementChange={handleStatementChange}
+          onAnalyze={handleAnalyze}
         />
 
-        {loading && <LoadingSpinner progress={progress} />}
+        {loading && <LoadingSpinner progress="Running CAMELS analysis..." />}
         {error && <div className="error">{error}</div>}
-
-        {warnings && warnings.length > 0 && (
-          <div className="warning">
-            <strong>Data quality warnings:</strong>
-            <ul>
-              {warnings.map((w, i) => <li key={i}>{w}</li>)}
-            </ul>
-          </div>
-        )}
 
         {result && (
           <div className="result">
             <div className="bank-info">
-              <h3>{bank?.bank_name || 'Unknown Bank'}</h3>
-              <p>{bank?.country || ''} — Fiscal Year {bank?.fiscal_year || ''} — {bank?.currency || 'XOF'}</p>
+              <h3>{result.bank_name || 'Unknown Bank'}</h3>
+              <p>{result.country || ''} — Fiscal Year {result.fiscal_year || ''} — {result.currency || 'XOF'}</p>
             </div>
 
-            <CompositeRating camelsRating={result?.camels_rating} analysis={analysis} />
+            <CompositeRating camelsRating={ratings?.composite} analysis={analysis} />
 
             <CAMELSSection
               letter="C"
@@ -96,11 +95,11 @@ function App() {
               ratios={[
                 { name: 'ROAA', formula: 'Net Profit / Average Total Assets', value: km?.roaa },
                 { name: 'ROAE', formula: "Net Profit / Average Shareholders' Equity", value: km?.roae },
-                { name: 'Net Interest Income / Avg Assets', formula: 'Net Interest Income / Avg Total Assets', value: bank?.net_interest_income_avg_assets },
-                { name: 'Non-Interest Income / Avg Assets', formula: '(Fees & Commissions + Net Sales + Dividends + ...) / Avg Total Assets', value: bank?.non_interest_income_avg_assets },
-                { name: 'Operating Expenses / Avg Assets', formula: '(Wages + Other OpEx + Amortization + Depreciation) / Avg Total Assets', value: bank?.opex_avg_assets },
-                { name: 'Tax Expenses / Avg Assets', formula: 'Tax Expenses / Avg Total Assets', value: bank?.tax_expenses_avg_assets },
-                { name: 'Other Income / Avg Assets', formula: '(Provisions Formed + Impairment + FX Exchange) / Avg Total Assets', value: bank?.other_income_avg_assets },
+                { name: 'Net Interest Income / Avg Assets', formula: 'Net Interest Income / Avg Total Assets', value: result?.ratios?.net_interest_income_avg_assets },
+                { name: 'Non-Interest Income / Avg Assets', formula: '(Fees & Commissions + ...) / Avg Total Assets', value: result?.ratios?.non_interest_income_avg_assets },
+                { name: 'Operating Expenses / Avg Assets', formula: '(Wages + Other OpEx + ...) / Avg Total Assets', value: result?.ratios?.opex_avg_assets },
+                { name: 'Tax Expenses / Avg Assets', formula: 'Tax Expenses / Avg Total Assets', value: result?.ratios?.tax_expenses_avg_assets },
+                { name: 'Other Income / Avg Assets', formula: '(Provisions Formed + Impairment + FX) / Avg Total Assets', value: result?.ratios?.other_income_avg_assets },
               ]}
             />
 
@@ -115,8 +114,8 @@ function App() {
               ]}
             />
 
-            <BalanceSheet bank={bank} />
-            <IncomeStatement bank={bank} />
+            <BalanceSheet bank={stmt} />
+            <IncomeStatement bank={stmt} />
             <MetricsGrid metrics={km} />
           </div>
         )}

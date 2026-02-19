@@ -1,56 +1,51 @@
 """
-API integration tests for main.py — uses FastAPI's TestClient with an
-in-memory SQLite database (no PostgreSQL needed for tests).
+API tests for main.py — mocks Supabase client to test endpoints
+without a real database connection.
 """
 import os
-import io
 import pytest
 from unittest.mock import patch, MagicMock
 
-# Use SQLite for tests
-os.environ["DATABASE_URL"] = "sqlite:///./test.db"
-os.environ["ANTHROPIC_API_KEY"] = "sk-ant-test-key"
+os.environ["SUPABASE_URL"] = "https://test.supabase.co"
+os.environ["SUPABASE_SERVICE_KEY"] = "test-key"
 os.environ["ENABLE_DOCS"] = "true"
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from database import Base, get_db
-from main import app, _upload_limiter
-
-# Override DB with SQLite
-TEST_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
-TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-def override_get_db():
-    db = TestSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
-
-
-@pytest.fixture(autouse=True)
-def setup_db():
-    """Create tables before each test, drop after."""
-    from models import BankDB  # noqa
-    from job_manager import JobDB  # noqa
-    Base.metadata.create_all(bind=engine)
-    # Reset rate limiter between tests
-    _upload_limiter._requests.clear()
-    yield
-    Base.metadata.drop_all(bind=engine)
+from main import app
 
 
 @pytest.fixture
 def client():
     from fastapi.testclient import TestClient
     return TestClient(app)
+
+
+def _mock_execute(data):
+    """Create a mock Supabase execute() result."""
+    result = MagicMock()
+    result.data = data
+    return result
+
+
+def _mock_table(table_responses):
+    """
+    Create a mock Supabase client where .table(name) returns
+    a chainable query builder that resolves to the given data.
+    """
+    mock_client = MagicMock()
+
+    def table_side_effect(table_name):
+        builder = MagicMock()
+        data = table_responses.get(table_name, [])
+        # Make all chained methods return the builder itself
+        builder.select.return_value = builder
+        builder.eq.return_value = builder
+        builder.order.return_value = builder
+        builder.upsert.return_value = builder
+        builder.execute.return_value = _mock_execute(data)
+        return builder
+
+    mock_client.table.side_effect = table_side_effect
+    return mock_client
 
 
 # ---------------------------------------------------------------------------
@@ -67,199 +62,174 @@ class TestHealthAndRoutes:
         resp = client.get("/")
         assert resp.status_code == 200
         assert "CAMELS" in resp.json()["message"]
+        assert resp.json()["version"] == "3.0.0"
 
-    def test_list_banks_empty(self, client):
-        resp = client.get("/banks")
+
+# ---------------------------------------------------------------------------
+# Companies
+# ---------------------------------------------------------------------------
+
+class TestCompanies:
+    @patch("main.get_client")
+    def test_list_companies(self, mock_get_client, client):
+        companies = [
+            {"id": "c1", "name": "Test Bank", "country": "Senegal", "entity_type": "bank", "created_at": "2024-01-01"},
+        ]
+        mock_get_client.return_value = _mock_table({"companies": companies})
+
+        resp = client.get("/companies")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["companies"][0]["name"] == "Test Bank"
+
+    @patch("main.get_client")
+    def test_list_companies_empty(self, mock_get_client, client):
+        mock_get_client.return_value = _mock_table({"companies": []})
+
+        resp = client.get("/companies")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
-    def test_get_bank_not_found(self, client):
-        resp = client.get("/banks/9999")
+    @patch("main.get_client")
+    def test_get_company(self, mock_get_client, client):
+        companies = [{"id": "c1", "name": "Test Bank", "country": "Senegal"}]
+        mock_get_client.return_value = _mock_table({"companies": companies})
+
+        resp = client.get("/companies/c1")
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "Test Bank"
+
+    @patch("main.get_client")
+    def test_get_company_not_found(self, mock_get_client, client):
+        mock_get_client.return_value = _mock_table({"companies": []})
+
+        resp = client.get("/companies/nonexistent")
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
-# Bank CRUD
+# Financial Statements
 # ---------------------------------------------------------------------------
 
-class TestBankCRUD:
-    def test_create_bank(self, client):
-        resp = client.post("/banks", json={
-            "name": "Test Bank",
-            "country": "Senegal",
-            "total_assets": 1000000.0,
-            "currency": "XOF"
-        })
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "Test Bank"
+class TestStatements:
+    @patch("main.get_client")
+    def test_list_statements(self, mock_get_client, client):
+        stmts = [
+            {"id": "s1", "company_id": "c1", "fiscal_year": "2023", "statement_type": "annual",
+             "currency": "XOF", "total_assets": 1000000, "total_equity": 120000, "net_income": 10000,
+             "created_at": "2024-01-01"},
+        ]
+        mock_get_client.return_value = _mock_table({"financial_statements": stmts})
 
-    def test_list_banks_after_create(self, client):
-        client.post("/banks", json={
-            "name": "Bank A",
-            "country": "Mali",
-            "total_assets": 500000.0,
-        })
-        resp = client.get("/banks")
+        resp = client.get("/companies/c1/statements")
+        assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
-    def test_get_bank_success(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Bank B",
-            "country": "Ivory Coast",
-            "total_assets": 750000.0,
-        })
-        bank_id = create_resp.json()["id"]
-        resp = client.get(f"/banks/{bank_id}")
+    @patch("main.get_client")
+    def test_get_statement(self, mock_get_client, client):
+        stmts = [{"id": "s1", "company_id": "c1", "fiscal_year": "2023", "total_assets": 1000000}]
+        mock_get_client.return_value = _mock_table({"financial_statements": stmts})
+
+        resp = client.get("/statements/s1")
         assert resp.status_code == 200
+        assert resp.json()["fiscal_year"] == "2023"
 
+    @patch("main.get_client")
+    def test_get_statement_not_found(self, mock_get_client, client):
+        mock_get_client.return_value = _mock_table({"financial_statements": []})
 
-# ---------------------------------------------------------------------------
-# File upload validation
-# ---------------------------------------------------------------------------
-
-class TestUploadValidation:
-    def test_reject_unsupported_extension(self, client):
-        file_content = b"not a real file"
-        resp = client.post("/upload", files={
-            "file": ("test.exe", io.BytesIO(file_content), "application/octet-stream")
-        })
-        assert resp.status_code == 400
-        assert "not allowed" in resp.json()["detail"]
-
-    def test_reject_no_filename(self, client):
-        file_content = b"test"
-        resp = client.post("/upload", files={
-            "file": ("", io.BytesIO(file_content), "application/octet-stream")
-        })
-        # Empty filename should be rejected (400) or at least not succeed (not 200)
-        assert resp.status_code != 200
-
-    def test_accept_pdf(self, client):
-        file_content = b"%PDF-1.4 fake pdf content"
-        resp = client.post("/upload", files={
-            "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-        })
-        assert resp.status_code == 200
-        assert resp.json()["message"] == "File uploaded"
-
-    def test_accept_xlsx(self, client):
-        file_content = b"PK\x03\x04 fake xlsx"
-        resp = client.post("/upload", files={
-            "file": ("data.xlsx", io.BytesIO(file_content), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        })
-        assert resp.status_code == 200
-
-    def test_accept_png(self, client):
-        file_content = b"\x89PNG fake image"
-        resp = client.post("/upload", files={
-            "file": ("scan.png", io.BytesIO(file_content), "image/png")
-        })
-        assert resp.status_code == 200
-
-    def test_reject_too_large(self, client):
-        with patch('main.MAX_UPLOAD_SIZE_MB', 0):
-            file_content = b"x" * 100
-            resp = client.post("/upload", files={
-                "file": ("big.pdf", io.BytesIO(file_content), "application/pdf")
-            })
-            assert resp.status_code == 413
-
-
-# ---------------------------------------------------------------------------
-# Upload-and-analyze (job creation)
-# ---------------------------------------------------------------------------
-
-class TestUploadAndAnalyze:
-    def test_creates_job(self, client):
-        with patch('main._job_executor') as mock_executor:
-            file_content = b"%PDF-1.4 test content"
-            resp = client.post("/upload-and-analyze", files={
-                "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-            })
-            assert resp.status_code == 200
-            data = resp.json()
-            assert "job_id" in data
-            assert data["status"] == "processing"
-            # Verify the executor was called
-            mock_executor.submit.assert_called_once()
-
-    def test_job_status_not_found(self, client):
-        resp = client.get("/job/nonexistent-id")
+        resp = client.get("/statements/nonexistent")
         assert resp.status_code == 404
 
 
 # ---------------------------------------------------------------------------
-# Rate limiting
+# CAMELS Analysis
 # ---------------------------------------------------------------------------
 
-class TestRateLimiting:
-    def test_rate_limit_upload(self, client):
-        """Hit the upload endpoint many times rapidly to test rate limiting."""
-        file_content = b"%PDF-1.4 test"
-        responses = []
-        with patch('main._job_executor'):
-            for _ in range(25):
-                resp = client.post("/upload-and-analyze", files={
-                    "file": ("report.pdf", io.BytesIO(file_content), "application/pdf")
-                })
-                responses.append(resp.status_code)
+class TestAnalysis:
+    @patch("main.get_client")
+    def test_analyze_statement(self, mock_get_client, client):
+        statement = {
+            "id": "s1", "company_id": "c1", "user_id": "u1",
+            "fiscal_year": "2023", "statement_type": "annual", "currency": "XOF",
+            "total_assets": 1_000_000, "total_equity": 120_000,
+            "gross_loans": 600_000, "deposits": 700_000,
+            "npls_mn": 20_000, "loan_loss_provisions": -30_000,
+            "net_income": 10_000, "net_interest_income": 50_000,
+            "operating_expenses": 30_000, "operating_income": 64_000,
+            "provision_expenses": 10_000, "income_tax": 5_000,
+            "cash_reserves_requirements": 50_000, "due_from_banks": 30_000,
+            "investment_securities": 100_000, "short_term_borrowings": 50_000,
+            "long_term_debt": 80_000,
+        }
+        company = {"name": "Test Bank", "country": "Senegal"}
 
-        # At least some should be rate-limited (429)
-        assert 429 in responses, "Rate limiter should reject some requests"
+        mock_client = MagicMock()
+        call_count = {"n": 0}
 
-    def test_rate_limiter_allows_within_limit(self):
-        """Test RateLimiter class directly."""
-        from main import RateLimiter
-        limiter = RateLimiter(max_requests=3, window_seconds=60)
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is True
-        assert limiter.check("test-ip") is False  # 4th request blocked
+        def table_side_effect(table_name):
+            builder = MagicMock()
+            builder.select.return_value = builder
+            builder.eq.return_value = builder
+            builder.order.return_value = builder
+            builder.upsert.return_value = builder
 
-    def test_rate_limiter_different_keys(self):
-        from main import RateLimiter
-        limiter = RateLimiter(max_requests=1, window_seconds=60)
-        assert limiter.check("ip-1") is True
-        assert limiter.check("ip-2") is True  # Different key
+            if table_name == "financial_statements":
+                builder.execute.return_value = _mock_execute([statement])
+            elif table_name == "companies":
+                builder.execute.return_value = _mock_execute([company])
+            elif table_name == "camels_analyses":
+                builder.execute.return_value = _mock_execute([])
+            else:
+                builder.execute.return_value = _mock_execute([])
+            return builder
 
+        mock_client.table.side_effect = table_side_effect
+        mock_get_client.return_value = mock_client
 
-# ---------------------------------------------------------------------------
-# Calculate & rating routes
-# ---------------------------------------------------------------------------
-
-class TestCalculateRoutes:
-    def test_calculate_ratios(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Calc Bank",
-            "country": "Senegal",
-            "total_assets": 1000000.0,
-        })
-        bank_id = create_resp.json()["id"]
-
-        resp = client.get(f"/banks/{bank_id}/calculate")
-        assert resp.status_code == 200
-        assert "ratios" in resp.json()
-
-    def test_calculate_not_found(self, client):
-        resp = client.get("/banks/9999/calculate")
-        assert resp.status_code == 404
-
-    def test_rating_route(self, client):
-        create_resp = client.post("/banks", json={
-            "name": "Rate Bank",
-            "country": "Mali",
-            "total_assets": 1000000.0,
-        })
-        bank_id = create_resp.json()["id"]
-
-        resp = client.get(f"/banks/{bank_id}/rating")
+        resp = client.post("/statements/s1/analyze")
         assert resp.status_code == 200
         data = resp.json()
-        assert "camels_ratings" in data
-        assert "composite_rating" in data
+        assert data["message"] == "Analysis complete"
+        assert data["bank_name"] == "Test Bank"
+        assert "ratios" in data
+        assert "ratings" in data
         assert "analysis" in data
+        assert "key_metrics" in data
+        # Verify ratios were computed
+        assert data["ratios"]["equity_assets"] is not None
+        assert data["ratings"]["composite"]["composite_rating"] is not None
 
-    def test_rating_not_found(self, client):
-        resp = client.get("/banks/9999/rating")
+    @patch("main.get_client")
+    def test_analyze_not_found(self, mock_get_client, client):
+        mock_get_client.return_value = _mock_table({"financial_statements": []})
+
+        resp = client.post("/statements/nonexistent/analyze")
         assert resp.status_code == 404
+
+    @patch("main.get_client")
+    def test_get_analysis(self, mock_get_client, client):
+        analysis = {"id": "a1", "statement_id": "s1", "composite_rating": {"composite_rating": 2}}
+        mock_get_client.return_value = _mock_table({"camels_analyses": [analysis]})
+
+        resp = client.get("/statements/s1/analysis")
+        assert resp.status_code == 200
+
+    @patch("main.get_client")
+    def test_get_analysis_not_found(self, mock_get_client, client):
+        mock_get_client.return_value = _mock_table({"camels_analyses": []})
+
+        resp = client.get("/statements/nonexistent/analysis")
+        assert resp.status_code == 404
+
+    @patch("main.get_client")
+    def test_list_analyses(self, mock_get_client, client):
+        analyses = [
+            {"id": "a1", "statement_id": "s1", "company_id": "c1", "composite_rating": {}, "created_at": "2024-01-01"},
+        ]
+        mock_get_client.return_value = _mock_table({"camels_analyses": analyses})
+
+        resp = client.get("/analyses")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1

@@ -3,9 +3,9 @@ Unit tests for camels_calculator.py
 
 Tests every ratio formula and rating function with known inputs/outputs
 to ensure correctness against the CAMELS cheat sheet.
+All functions now work with plain dicts.
 """
 import pytest
-from types import SimpleNamespace
 
 from camels_calculator import (
     _safe_divide,
@@ -21,6 +21,7 @@ from camels_calculator import (
     rate_liquidity,
     get_composite_rating,
     generate_analysis_paragraphs,
+    run_full_analysis,
 )
 
 
@@ -66,37 +67,38 @@ class TestCalculateAverage:
         assert _calculate_average(100, 0) == 100
 
     def test_current_zero_with_previous(self):
-        # current is falsy (0), previous exists -> returns previous
         assert _calculate_average(0, 80) == 80
 
     def test_both_zero(self):
         assert _calculate_average(0, 0) == 0
 
     def test_current_none(self):
-        # current is None (falsy), no previous -> 0
         assert _calculate_average(None) == 0
 
 
 class TestGet:
-    def test_existing_attr(self):
-        obj = SimpleNamespace(total_assets=1000)
-        assert _get(obj, 'total_assets') == 1000
+    def test_existing_key(self):
+        data = {"total_assets": 1000}
+        assert _get(data, 'total_assets') == 1000
 
-    def test_missing_attr(self):
-        obj = SimpleNamespace()
-        assert _get(obj, 'total_assets') == 0
+    def test_missing_key(self):
+        data = {}
+        assert _get(data, 'total_assets') == 0
 
-    def test_none_attr(self):
-        obj = SimpleNamespace(total_assets=None)
-        assert _get(obj, 'total_assets') == 0
+    def test_none_value(self):
+        data = {"total_assets": None}
+        assert _get(data, 'total_assets') == 0
 
     def test_custom_default(self):
-        obj = SimpleNamespace()
-        assert _get(obj, 'total_assets', 999) == 999
+        data = {}
+        assert _get(data, 'total_assets', 999) == 999
 
     def test_zero_is_valid(self):
-        obj = SimpleNamespace(total_assets=0)
-        assert _get(obj, 'total_assets') == 0
+        data = {"total_assets": 0}
+        assert _get(data, 'total_assets') == 0
+
+    def test_none_data(self):
+        assert _get(None, 'total_assets') == 0
 
 
 class TestPct:
@@ -127,13 +129,14 @@ class TestRatingLabel:
 
 
 # ---------------------------------------------------------------------------
-# Bank fixture — a SimpleNamespace that mimics BankDB
+# Statement fixture — a plain dict mimicking a Supabase row
 # ---------------------------------------------------------------------------
 
-def _make_bank(**overrides):
-    """Create a bank-like object with sensible defaults for testing."""
+def _make_statement(**overrides):
+    """Create a financial statement dict with sensible defaults."""
     defaults = dict(
         bank_name="Test Bank",
+        name="Test Bank",
         country="Senegal",
         fiscal_year="2023",
         currency="XOF",
@@ -194,12 +197,9 @@ def _make_bank(**overrides):
         llr_mn=25_000,
         car_regulatory=14.3,
         car_bank_reported=None,
-        # FX
-        fx_rate_period_end=None,
-        fx_rate_period_avg=None,
     )
     defaults.update(overrides)
-    return SimpleNamespace(**defaults)
+    return defaults
 
 
 # ---------------------------------------------------------------------------
@@ -209,108 +209,118 @@ def _make_bank(**overrides):
 class TestCalculateAllRatios:
 
     def test_equity_assets(self):
-        bank = _make_bank(total_equity=120_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
-        assert abs(bank.equity_assets - 0.12) < 1e-9
+        stmt = _make_statement(total_equity=120_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
+        assert abs(ratios['equity_assets'] - 0.12) < 1e-9
 
     def test_debt_assets(self):
-        bank = _make_bank(short_term_borrowings=50_000, long_term_debt=80_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
-        assert abs(bank.debt_assets - 0.13) < 1e-9
+        stmt = _make_statement(short_term_borrowings=50_000, long_term_debt=80_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
+        assert abs(ratios['debt_assets'] - 0.13) < 1e-9
 
     def test_debt_assets_no_debt(self):
-        bank = _make_bank(short_term_borrowings=0, long_term_debt=0)
-        bank = calculate_all_ratios(bank)
-        assert bank.debt_assets is None
+        stmt = _make_statement(short_term_borrowings=0, long_term_debt=0)
+        ratios = calculate_all_ratios(stmt)
+        assert ratios['debt_assets'] is None
 
     def test_npl_ratio(self):
-        bank = _make_bank(npls_mn=20_000, gross_loans=600_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(npls_mn=20_000, gross_loans=600_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 20_000 / 600_000
-        assert abs(bank.npl_ratio - expected) < 1e-9
+        assert abs(ratios['npl_ratio'] - expected) < 1e-9
 
     def test_coverage_ratio(self):
-        bank = _make_bank(loan_loss_provisions=-30_000, npls_mn=20_000)
-        bank = calculate_all_ratios(bank)
-        expected = 30_000 / 20_000  # abs(provisions) / NPLs
-        assert abs(bank.coverage_ratio - expected) < 1e-9
+        stmt = _make_statement(loan_loss_provisions=-30_000, npls_mn=20_000)
+        ratios = calculate_all_ratios(stmt)
+        expected = 30_000 / 20_000
+        assert abs(ratios['coverage_ratio'] - expected) < 1e-9
 
     def test_cost_of_risk(self):
-        bank = _make_bank(provision_expenses=10_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(provision_expenses=10_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 10_000 / 1_000_000
-        assert abs(bank.cost_of_risk_avg_assets - expected) < 1e-9
+        assert abs(ratios['cost_of_risk_avg_assets'] - expected) < 1e-9
 
     def test_cost_to_income(self):
-        bank = _make_bank(operating_expenses=30_000, operating_income=64_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(operating_expenses=30_000, operating_income=64_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 30_000 / 64_000
-        assert abs(bank.cost_to_income - expected) < 1e-9
+        assert abs(ratios['cost_to_income'] - expected) < 1e-9
 
     def test_roaa(self):
-        bank = _make_bank(net_income=10_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(net_income=10_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 10_000 / 1_000_000
-        assert abs(bank.roaa - expected) < 1e-9
+        assert abs(ratios['roaa'] - expected) < 1e-9
 
     def test_roae(self):
-        bank = _make_bank(net_income=10_000, total_equity=120_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(net_income=10_000, total_equity=120_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 10_000 / 120_000
-        assert abs(bank.roae - expected) < 1e-9
+        assert abs(ratios['roae'] - expected) < 1e-9
 
     def test_nii_avg_assets(self):
-        bank = _make_bank(net_interest_income=50_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(net_interest_income=50_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 50_000 / 1_000_000
-        assert abs(bank.net_interest_income_avg_assets - expected) < 1e-9
+        assert abs(ratios['net_interest_income_avg_assets'] - expected) < 1e-9
 
     def test_liquid_assets_total_assets(self):
-        bank = _make_bank(
+        stmt = _make_statement(
             cash_reserves_requirements=50_000,
             due_from_banks=30_000,
             investment_securities=100_000,
             total_assets=1_000_000,
         )
-        bank = calculate_all_ratios(bank)
+        ratios = calculate_all_ratios(stmt)
         expected = (50_000 + 30_000 + 100_000) / 1_000_000
-        assert abs(bank.liquid_assets_total_assets - expected) < 1e-9
+        assert abs(ratios['liquid_assets_total_assets'] - expected) < 1e-9
 
     def test_gross_loans_deposits(self):
-        bank = _make_bank(gross_loans=600_000, deposits=700_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(gross_loans=600_000, deposits=700_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 600_000 / 700_000
-        assert abs(bank.gross_loans_deposits - expected) < 1e-9
+        assert abs(ratios['gross_loans_deposits'] - expected) < 1e-9
 
     def test_opex_avg_assets_granular(self):
-        bank = _make_bank(
+        stmt = _make_statement(
             wages_salaries=15_000,
             other_opex=10_000,
             intangible_amortization=2_000,
             fixed_asset_depreciation=3_000,
             total_assets=1_000_000,
         )
-        bank = calculate_all_ratios(bank)
+        ratios = calculate_all_ratios(stmt)
         expected = 30_000 / 1_000_000
-        assert abs(bank.opex_avg_assets - expected) < 1e-9
+        assert abs(ratios['opex_avg_assets'] - expected) < 1e-9
 
     def test_tax_expenses_avg_assets(self):
-        bank = _make_bank(income_tax=5_000, total_assets=1_000_000)
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(income_tax=5_000, total_assets=1_000_000)
+        ratios = calculate_all_ratios(stmt)
         expected = 5_000 / 1_000_000
-        assert abs(bank.tax_expenses_avg_assets - expected) < 1e-9
+        assert abs(ratios['tax_expenses_avg_assets'] - expected) < 1e-9
 
-    def test_with_previous_bank(self):
-        bank = _make_bank(net_income=10_000, total_assets=1_200_000, total_equity=140_000)
-        prev = _make_bank(total_assets=800_000, total_equity=100_000)
-        bank = calculate_all_ratios(bank, prev_bank=prev)
-        avg_assets = (1_200_000 + 800_000) / 2  # 1_000_000
-        avg_equity = (140_000 + 100_000) / 2  # 120_000
-        assert abs(bank.roaa - 10_000 / avg_assets) < 1e-9
-        assert abs(bank.roae - 10_000 / avg_equity) < 1e-9
+    def test_with_previous_statement(self):
+        stmt = _make_statement(net_income=10_000, total_assets=1_200_000, total_equity=140_000)
+        prev = _make_statement(total_assets=800_000, total_equity=100_000)
+        ratios = calculate_all_ratios(stmt, prev_statement=prev)
+        avg_assets = (1_200_000 + 800_000) / 2
+        avg_equity = (140_000 + 100_000) / 2
+        assert abs(ratios['roaa'] - 10_000 / avg_assets) < 1e-9
+        assert abs(ratios['roae'] - 10_000 / avg_equity) < 1e-9
+
+    def test_returns_dict_not_mutating_input(self):
+        stmt = _make_statement()
+        original_keys = set(stmt.keys())
+        ratios = calculate_all_ratios(stmt)
+        # Input dict should not have new keys
+        assert set(stmt.keys()) == original_keys
+        # Return value should be a separate dict
+        assert isinstance(ratios, dict)
+        assert 'equity_assets' in ratios
 
     def test_all_zeros_no_crash(self):
-        bank = _make_bank(
+        stmt = _make_statement(
             total_assets=0, total_equity=0, gross_loans=0,
             npls_mn=0, net_income=0, deposits=0,
             operating_expenses=0, operating_income=0,
@@ -320,13 +330,12 @@ class TestCalculateAllRatios:
             investment_securities=0, interest_income=0,
             interest_expenses=0, net_interest_income=0,
         )
-        # Should not raise
-        bank = calculate_all_ratios(bank)
-        assert bank is not None
+        ratios = calculate_all_ratios(stmt)
+        assert isinstance(ratios, dict)
 
     def test_all_none_no_crash(self):
-        bank = _make_bank(
-            total_assets=1000,  # must be non-zero for some calcs
+        stmt = _make_statement(
+            total_assets=1000,
             total_equity=None, gross_loans=None,
             npls_mn=None, net_income=None, deposits=None,
             operating_expenses=None, operating_income=None,
@@ -335,161 +344,122 @@ class TestCalculateAllRatios:
             cash_reserves_requirements=None, due_from_banks=None,
             investment_securities=None,
         )
-        bank = calculate_all_ratios(bank)
-        assert bank is not None
+        ratios = calculate_all_ratios(stmt)
+        assert isinstance(ratios, dict)
 
 
 # ---------------------------------------------------------------------------
-# Rating function tests
+# Rating function tests (now take dicts of ratios)
 # ---------------------------------------------------------------------------
 
 class TestRateCapital:
     def test_strong(self):
-        bank = SimpleNamespace(equity_assets=0.15)
-        assert rate_capital(bank)["rating"] == 1
+        assert rate_capital({"equity_assets": 0.15})["rating"] == 1
 
     def test_satisfactory(self):
-        bank = SimpleNamespace(equity_assets=0.10, debt_assets=0.2)
-        result = rate_capital(bank)
+        result = rate_capital({"equity_assets": 0.10, "debt_assets": 0.2})
         assert result["rating"] == 2
 
     def test_fair(self):
-        bank = SimpleNamespace(equity_assets=0.07, debt_assets=None)
-        assert rate_capital(bank)["rating"] == 3
+        assert rate_capital({"equity_assets": 0.07})["rating"] == 3
 
     def test_marginal(self):
-        bank = SimpleNamespace(equity_assets=0.05)
-        assert rate_capital(bank)["rating"] == 4
+        assert rate_capital({"equity_assets": 0.05})["rating"] == 4
 
     def test_unsatisfactory(self):
-        bank = SimpleNamespace(equity_assets=0.02)
-        assert rate_capital(bank)["rating"] == 5
+        assert rate_capital({"equity_assets": 0.02})["rating"] == 5
 
     def test_none(self):
-        bank = SimpleNamespace(equity_assets=None)
-        assert rate_capital(bank)["rating"] is None
+        assert rate_capital({"equity_assets": None})["rating"] is None
+
+    def test_missing_key(self):
+        assert rate_capital({})["rating"] is None
 
     def test_boundary_12_pct(self):
-        bank = SimpleNamespace(equity_assets=0.12, debt_assets=None)
-        assert rate_capital(bank)["rating"] == 1
+        assert rate_capital({"equity_assets": 0.12})["rating"] == 1
 
     def test_boundary_9_pct(self):
-        bank = SimpleNamespace(equity_assets=0.09, debt_assets=None)
-        assert rate_capital(bank)["rating"] == 2
+        assert rate_capital({"equity_assets": 0.09})["rating"] == 2
 
 
 class TestRateAssetQuality:
     def test_strong(self):
-        bank = SimpleNamespace(npl_ratio=0.01, coverage_ratio=1.2, cost_of_risk_avg_assets=0.005)
-        assert rate_asset_quality(bank)["rating"] == 1
+        assert rate_asset_quality({"npl_ratio": 0.01})["rating"] == 1
 
     def test_satisfactory(self):
-        bank = SimpleNamespace(npl_ratio=0.04, coverage_ratio=0.9, cost_of_risk_avg_assets=0.01)
-        assert rate_asset_quality(bank)["rating"] == 2
+        assert rate_asset_quality({"npl_ratio": 0.04})["rating"] == 2
 
     def test_fair(self):
-        bank = SimpleNamespace(npl_ratio=0.06, coverage_ratio=None, cost_of_risk_avg_assets=None)
-        assert rate_asset_quality(bank)["rating"] == 3
+        assert rate_asset_quality({"npl_ratio": 0.06})["rating"] == 3
 
     def test_marginal(self):
-        bank = SimpleNamespace(npl_ratio=0.10, coverage_ratio=None, cost_of_risk_avg_assets=None)
-        assert rate_asset_quality(bank)["rating"] == 4
+        assert rate_asset_quality({"npl_ratio": 0.10})["rating"] == 4
 
     def test_unsatisfactory(self):
-        bank = SimpleNamespace(npl_ratio=0.15, coverage_ratio=None, cost_of_risk_avg_assets=None)
-        assert rate_asset_quality(bank)["rating"] == 5
+        assert rate_asset_quality({"npl_ratio": 0.15})["rating"] == 5
 
     def test_none(self):
-        bank = SimpleNamespace(npl_ratio=None)
-        assert rate_asset_quality(bank)["rating"] is None
+        assert rate_asset_quality({"npl_ratio": None})["rating"] is None
 
 
 class TestRateManagement:
     def test_strong(self):
-        bank = SimpleNamespace(cost_to_income=0.35)
-        assert rate_management(bank)["rating"] == 1
+        assert rate_management({"cost_to_income": 0.35})["rating"] == 1
 
     def test_satisfactory(self):
-        bank = SimpleNamespace(cost_to_income=0.50)
-        assert rate_management(bank)["rating"] == 2
+        assert rate_management({"cost_to_income": 0.50})["rating"] == 2
 
     def test_fair(self):
-        bank = SimpleNamespace(cost_to_income=0.65)
-        assert rate_management(bank)["rating"] == 3
+        assert rate_management({"cost_to_income": 0.65})["rating"] == 3
 
     def test_marginal(self):
-        bank = SimpleNamespace(cost_to_income=0.80)
-        assert rate_management(bank)["rating"] == 4
+        assert rate_management({"cost_to_income": 0.80})["rating"] == 4
 
     def test_unsatisfactory(self):
-        bank = SimpleNamespace(cost_to_income=0.90)
-        assert rate_management(bank)["rating"] == 5
+        assert rate_management({"cost_to_income": 0.90})["rating"] == 5
 
     def test_none(self):
-        bank = SimpleNamespace(cost_to_income=None)
-        assert rate_management(bank)["rating"] is None
+        assert rate_management({"cost_to_income": None})["rating"] is None
 
 
 class TestRateEarnings:
     def test_strong(self):
-        bank = SimpleNamespace(roae=0.20, roaa=0.03, net_interest_income_avg_assets=0.05,
-                               non_interest_income_avg_assets=0.02, opex_avg_assets=0.03,
-                               tax_expenses_avg_assets=0.005, other_income_avg_assets=0.001)
-        assert rate_earnings(bank)["rating"] == 1
+        assert rate_earnings({"roae": 0.20})["rating"] == 1
 
     def test_satisfactory(self):
-        bank = SimpleNamespace(roae=0.12, roaa=0.02, net_interest_income_avg_assets=None,
-                               non_interest_income_avg_assets=None, opex_avg_assets=None,
-                               tax_expenses_avg_assets=None, other_income_avg_assets=None)
-        assert rate_earnings(bank)["rating"] == 2
+        assert rate_earnings({"roae": 0.12})["rating"] == 2
 
     def test_fair(self):
-        bank = SimpleNamespace(roae=0.07, roaa=None, net_interest_income_avg_assets=None,
-                               non_interest_income_avg_assets=None, opex_avg_assets=None,
-                               tax_expenses_avg_assets=None, other_income_avg_assets=None)
-        assert rate_earnings(bank)["rating"] == 3
+        assert rate_earnings({"roae": 0.07})["rating"] == 3
 
     def test_marginal(self):
-        bank = SimpleNamespace(roae=0.02, roaa=None, net_interest_income_avg_assets=None,
-                               non_interest_income_avg_assets=None, opex_avg_assets=None,
-                               tax_expenses_avg_assets=None, other_income_avg_assets=None)
-        assert rate_earnings(bank)["rating"] == 4
+        assert rate_earnings({"roae": 0.02})["rating"] == 4
 
     def test_unsatisfactory(self):
-        bank = SimpleNamespace(roae=-0.05, roaa=None, net_interest_income_avg_assets=None,
-                               non_interest_income_avg_assets=None, opex_avg_assets=None,
-                               tax_expenses_avg_assets=None, other_income_avg_assets=None)
-        assert rate_earnings(bank)["rating"] == 5
+        assert rate_earnings({"roae": -0.05})["rating"] == 5
 
     def test_none(self):
-        bank = SimpleNamespace(roae=None)
-        assert rate_earnings(bank)["rating"] is None
+        assert rate_earnings({"roae": None})["rating"] is None
 
 
 class TestRateLiquidity:
     def test_strong(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=0.40)
-        assert rate_liquidity(bank)["rating"] == 1
+        assert rate_liquidity({"liquid_assets_total_assets": 0.40})["rating"] == 1
 
     def test_satisfactory(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=0.30)
-        assert rate_liquidity(bank)["rating"] == 2
+        assert rate_liquidity({"liquid_assets_total_assets": 0.30})["rating"] == 2
 
     def test_fair(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=0.20)
-        assert rate_liquidity(bank)["rating"] == 3
+        assert rate_liquidity({"liquid_assets_total_assets": 0.20})["rating"] == 3
 
     def test_marginal(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=0.12)
-        assert rate_liquidity(bank)["rating"] == 4
+        assert rate_liquidity({"liquid_assets_total_assets": 0.12})["rating"] == 4
 
     def test_unsatisfactory(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=0.05)
-        assert rate_liquidity(bank)["rating"] == 5
+        assert rate_liquidity({"liquid_assets_total_assets": 0.05})["rating"] == 5
 
     def test_none(self):
-        bank = SimpleNamespace(liquid_assets_total_assets=None)
-        assert rate_liquidity(bank)["rating"] is None
+        assert rate_liquidity({"liquid_assets_total_assets": None})["rating"] is None
 
 
 class TestCompositeRating:
@@ -504,7 +474,6 @@ class TestCompositeRating:
         assert result["average"] == 2.0
 
     def test_rounds_up(self):
-        # avg = 2.6 -> rounds to 3
         c = {"rating": 2}
         a = {"rating": 3}
         m = {"rating": 3}
@@ -535,20 +504,20 @@ class TestCompositeRating:
 
 class TestGenerateAnalysisParagraphs:
     def test_returns_all_sections(self):
-        bank = _make_bank()
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement()
+        ratios = calculate_all_ratios(stmt)
         ratings = {
-            "capital": rate_capital(bank),
-            "asset_quality": rate_asset_quality(bank),
-            "management": rate_management(bank),
-            "earnings": rate_earnings(bank),
-            "liquidity": rate_liquidity(bank),
+            "capital": rate_capital(ratios),
+            "asset_quality": rate_asset_quality(ratios),
+            "management": rate_management(ratios),
+            "earnings": rate_earnings(ratios),
+            "liquidity": rate_liquidity(ratios),
         }
         ratings["composite"] = get_composite_rating(
             ratings["capital"], ratings["asset_quality"],
             ratings["management"], ratings["earnings"], ratings["liquidity"]
         )
-        paragraphs = generate_analysis_paragraphs(bank, ratings)
+        paragraphs = generate_analysis_paragraphs(stmt, ratios, ratings)
 
         assert "capital" in paragraphs
         assert "asset_quality" in paragraphs
@@ -557,42 +526,61 @@ class TestGenerateAnalysisParagraphs:
         assert "liquidity" in paragraphs
         assert "composite" in paragraphs
 
-    def test_writes_to_bank_object(self):
-        bank = _make_bank()
-        bank = calculate_all_ratios(bank)
-        ratings = {
-            "capital": rate_capital(bank),
-            "asset_quality": rate_asset_quality(bank),
-            "management": rate_management(bank),
-            "earnings": rate_earnings(bank),
-            "liquidity": rate_liquidity(bank),
-        }
-        ratings["composite"] = get_composite_rating(
-            ratings["capital"], ratings["asset_quality"],
-            ratings["management"], ratings["earnings"], ratings["liquidity"]
-        )
-        generate_analysis_paragraphs(bank, ratings)
-
-        assert bank.analysis_capital is not None
-        assert bank.analysis_asset_quality is not None
-        assert bank.analysis_management is not None
-        assert bank.analysis_earnings is not None
-        assert bank.analysis_liquidity is not None
-        assert bank.analysis_composite is not None
-
     def test_paragraphs_contain_bank_name(self):
-        bank = _make_bank(bank_name="Banque Atlantique")
-        bank = calculate_all_ratios(bank)
+        stmt = _make_statement(bank_name="Banque Atlantique", name="Banque Atlantique")
+        ratios = calculate_all_ratios(stmt)
         ratings = {
-            "capital": rate_capital(bank),
-            "asset_quality": rate_asset_quality(bank),
-            "management": rate_management(bank),
-            "earnings": rate_earnings(bank),
-            "liquidity": rate_liquidity(bank),
+            "capital": rate_capital(ratios),
+            "asset_quality": rate_asset_quality(ratios),
+            "management": rate_management(ratios),
+            "earnings": rate_earnings(ratios),
+            "liquidity": rate_liquidity(ratios),
         }
         ratings["composite"] = get_composite_rating(
             ratings["capital"], ratings["asset_quality"],
             ratings["management"], ratings["earnings"], ratings["liquidity"]
         )
-        paragraphs = generate_analysis_paragraphs(bank, ratings)
+        paragraphs = generate_analysis_paragraphs(stmt, ratios, ratings)
         assert "Banque Atlantique" in paragraphs["capital"]
+
+    def test_does_not_mutate_input(self):
+        stmt = _make_statement()
+        original_keys = set(stmt.keys())
+        ratios = calculate_all_ratios(stmt)
+        ratings = {
+            "capital": rate_capital(ratios),
+            "asset_quality": rate_asset_quality(ratios),
+            "management": rate_management(ratios),
+            "earnings": rate_earnings(ratios),
+            "liquidity": rate_liquidity(ratios),
+        }
+        ratings["composite"] = get_composite_rating(
+            ratings["capital"], ratings["asset_quality"],
+            ratings["management"], ratings["earnings"], ratings["liquidity"]
+        )
+        generate_analysis_paragraphs(stmt, ratios, ratings)
+        # Statement dict should not have been modified
+        assert set(stmt.keys()) == original_keys
+
+
+# ---------------------------------------------------------------------------
+# run_full_analysis convenience function
+# ---------------------------------------------------------------------------
+
+class TestRunFullAnalysis:
+    def test_returns_complete_result(self):
+        stmt = _make_statement()
+        result = run_full_analysis(stmt)
+        assert "ratios" in result
+        assert "ratings" in result
+        assert "analysis" in result
+        assert "composite" in result["ratings"]
+        assert "composite" in result["analysis"]
+
+    def test_with_previous_period(self):
+        stmt = _make_statement(total_assets=1_200_000)
+        prev = _make_statement(total_assets=800_000)
+        result = run_full_analysis(stmt, prev_statement=prev)
+        avg_assets = (1_200_000 + 800_000) / 2
+        expected_roaa = 10_000 / avg_assets
+        assert abs(result["ratios"]["roaa"] - expected_roaa) < 1e-9
