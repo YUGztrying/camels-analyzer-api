@@ -149,6 +149,44 @@ button:disabled {
   font-size: 1.1rem;
 }
 
+/* EXPORT BAR */
+.export-bar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #2E7D32;
+  color: white;
+  border: none;
+  padding: 10px 22px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0;
+  transition: background 0.3s, box-shadow 0.3s;
+  box-shadow: 0 2px 4px rgba(46, 125, 50, 0.3);
+}
+
+.export-btn:hover {
+  background: #1B5E20;
+  box-shadow: 0 4px 8px rgba(46, 125, 50, 0.4);
+}
+
+.export-btn:active {
+  transform: translateY(1px);
+  box-shadow: 0 1px 2px rgba(46, 125, 50, 0.3);
+}
+
+.export-icon {
+  flex-shrink: 0;
+}
+
 /* COMPOSITE RATING */
 .rating-box {
   background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%);
@@ -445,3 +483,350 @@ button:disabled {
 .section-header.earnings { background: #1565C0; }
 .section-header.liquidity { background: #00838F; }
 .section-header.dupont { background: #6A1B9A; }
+
+/* ──────────────────────────────────────────────────────────────────────
+   MULTI-YEAR EVOLUTION TABLES
+   ────────────────────────────────────────────────────────────────────── */
+
+.evo-section {
+  margin: 1.5rem 0;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.evo-header {
+  padding: 0.8rem 1.2rem;
+  color: white;
+}
+
+.evo-header h4 {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+/* Section header colours */
+.ratings-section-header { background: #37474F; }
+.capital-header    { background: #2E7D32; }
+.asset-header      { background: #E65100; }
+.management-header { background: #6A1B9A; }
+.earnings-header   { background: #1565C0; }
+.liquidity-header  { background: #00838F; }
+.financials-header { background: #37474F; }
+
+/* Evolution table (period columns) */
+.evo-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+}
+
+.evo-table thead {
+  background: #f5f5f5;
+}
+
+.evo-table th {
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+  font-weight: 600;
+  color: #444;
+  border-bottom: 2px solid #ddd;
+  white-space: nowrap;
+}
+
+.evo-table td {
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid #eee;
+}
+
+.evo-table tbody tr:hover {
+  background: #fafafa;
+}
+
+/* Period columns (centre-aligned) */
+.pc {
+  text-align: center !important;
+}
+
+/* Numeric cells: monospace, right align in period cols */
+.num-cell {
+  font-family: 'Courier New', monospace;
+  font-weight: 500;
+  text-align: right !important;
+}
+
+/* First column labels */
+.row-label {
+  font-weight: 500;
+  color: #333;
+  white-space: nowrap;
+}
+
+/* Composite row (bold) */
+.composite-row {
+  background: #f0f4f8;
+}
+
+.composite-row td {
+  font-weight: 700;
+  border-bottom: 2px solid #ccc;
+}
+
+/* Rating pills */
+.rpill {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.r-1 { background: #C8E6C9; color: #1B5E20; }
+.r-2 { background: #DCEDC8; color: #33691E; }
+.r-3 { background: #FFF9C4; color: #F57F17; }
+.r-4 { background: #FFE0B2; color: #E65100; }
+.r-5 { background: #FFCDD2; color: #B71C1C; }
+
+.na {
+  color: #999;
+  font-style: italic;
+}
+
+/* Bold rows in financial tables */
+.bold-row td {
+  font-weight: 700;
+}
+
+/* Analysis section */
+.analysis-section {
+  margin-top: 1.5rem;
+  background: white;
+  border-radius: 8px;
+  padding: 1.5rem 2rem;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.analysis-section h3 {
+  margin: 0 0 1.2rem 0;
+  color: #1a1a1a;
+  font-size: 1.3rem;
+  border-bottom: 2px solid #ddd;
+  padding-bottom: 0.5rem;
+}
+
+.analysis-block {
+  margin-bottom: 1.5rem;
+}
+
+.analysis-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.05rem;
+  color: #1a365d;
+}
+
+.analysis-title-text {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  font-weight: 700;
+}
+
+.analysis-rating-tag {
+  font-weight: 600;
+  color: #444;
+}
+
+.analysis-bullets {
+  margin: 0;
+  padding-left: 1.5rem;
+  list-style-type: disc;
+}
+
+.analysis-bullets li {
+  line-height: 1.7;
+  color: #333;
+  font-size: 0.93rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Editable cells */
+.editable-cell {
+  cursor: pointer;
+  position: relative;
+}
+
+.editable-cell:hover {
+  background: #e3f2fd;
+}
+
+.editing-cell {
+  padding: 0.2rem 0.3rem;
+}
+
+.cell-input {
+  width: 80px;
+  padding: 0.3rem 0.4rem;
+  border: 2px solid #1565C0;
+  border-radius: 4px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  text-align: right;
+  outline: none;
+}
+
+.cell-input:focus {
+  box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.3);
+}
+
+.edit-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  font-size: 0.65rem;
+  color: #1565C0;
+  background: #e3f2fd;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+  font-weight: 600;
+  vertical-align: middle;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+/* ──────────────────────────────────────────────────────────────────────
+   INPUT MODAL (post-extraction CAR / NPL input)
+   ────────────────────────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 12px;
+  padding: 2rem;
+  max-width: 600px;
+  width: 100%;
+  max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  text-align: left;
+}
+
+.modal-content h3 {
+  margin: 0 0 0.5rem 0;
+  color: #1a1a1a;
+  font-size: 1.4rem;
+}
+
+.modal-desc {
+  color: #666;
+  font-size: 0.93rem;
+  line-height: 1.5;
+  margin: 0 0 1.5rem 0;
+}
+
+.modal-periods {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+
+.modal-period {
+  background: #f8f9fa;
+  border-radius: 8px;
+  padding: 1rem 1.2rem;
+  border: 1px solid #e0e0e0;
+}
+
+.modal-period-label {
+  margin: 0 0 0.8rem 0;
+  font-size: 1rem;
+  color: #1565C0;
+  font-weight: 600;
+}
+
+.modal-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.modal-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.modal-field label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #555;
+}
+
+.modal-field input {
+  padding: 0.5rem 0.7rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-family: 'Courier New', monospace;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.modal-field input:focus {
+  border-color: #1565C0;
+  box-shadow: 0 0 0 2px rgba(21, 101, 192, 0.15);
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.8rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eee;
+}
+
+.modal-skip {
+  background: #f5f5f5;
+  color: #555;
+  border: 1px solid #ccc;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0;
+  transition: background 0.2s;
+}
+
+.modal-skip:hover {
+  background: #e0e0e0;
+}
+
+.modal-confirm {
+  background: #1565C0;
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 0;
+  transition: background 0.2s;
+}
+
+.modal-confirm:hover {
+  background: #0D47A1;
+}
