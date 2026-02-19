@@ -37,7 +37,8 @@ export function useAnalyzer(userId) {
       const data = await analyzeCompany(selectedCompany.company_name, userId);
       setResult(data);
     } catch (err) {
-      const msg = err.response?.data?.detail || err.message;
+      const detail = err.response?.data?.detail;
+      const msg = Array.isArray(detail) ? detail.map(d => d.msg).join(', ') : (detail || err.message);
       setError('Analysis error: ' + msg);
     } finally {
       setLoading(false);
