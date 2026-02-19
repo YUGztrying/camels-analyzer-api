@@ -15,7 +15,7 @@ class BankDB(Base):
 
     # === GENERAL INFO ===
     bank_name = Column(String, nullable=False, index=True)
-    country = Column(String, nullable=False)
+    country = Column(String, nullable=True)
     fiscal_year = Column(String, default="N/A")
     period_end_date = Column(DateTime)
     currency = Column(String, default="XOF")
@@ -91,6 +91,12 @@ class BankDB(Base):
     llr_mn = Column(Float)
     car_regulatory = Column(Float)
     car_bank_reported = Column(Float)
+    # Bank-reported ratios (used as fallback when calculated ratios are None)
+    npl_ratio_reported = Column(Float)
+    coverage_ratio_reported = Column(Float)
+    roe_reported = Column(Float)
+    roa_reported = Column(Float)
+    cost_income_reported = Column(Float)
 
     # === CALCULATED RATIOS - C (Capital Adequacy) ===
     equity_assets = Column(Float)       # Equity / Assets

@@ -66,15 +66,19 @@ class TestCalculateAverage:
         assert _calculate_average(100, 0) == 100
 
     def test_current_zero_with_previous(self):
-        # current is falsy (0), previous exists -> returns previous
-        assert _calculate_average(0, 80) == 80
+        # current is 0 (valid number), previous exists -> averages them
+        assert _calculate_average(0, 80) == 40.0
 
     def test_both_zero(self):
-        assert _calculate_average(0, 0) == 0
+        assert _calculate_average(0, 0) is None
 
     def test_current_none(self):
-        # current is None (falsy), no previous -> 0
-        assert _calculate_average(None) == 0
+        # current is None, no previous -> None
+        assert _calculate_average(None) is None
+
+    def test_current_none_with_previous(self):
+        # current is None, previous exists -> returns previous
+        assert _calculate_average(None, 80) == 80
 
 
 class TestGet:
@@ -84,11 +88,11 @@ class TestGet:
 
     def test_missing_attr(self):
         obj = SimpleNamespace()
-        assert _get(obj, 'total_assets') == 0
+        assert _get(obj, 'total_assets') is None
 
     def test_none_attr(self):
         obj = SimpleNamespace(total_assets=None)
-        assert _get(obj, 'total_assets') == 0
+        assert _get(obj, 'total_assets') is None
 
     def test_custom_default(self):
         obj = SimpleNamespace()
@@ -97,6 +101,12 @@ class TestGet:
     def test_zero_is_valid(self):
         obj = SimpleNamespace(total_assets=0)
         assert _get(obj, 'total_assets') == 0
+
+    def test_none_obj(self):
+        assert _get(None, 'total_assets') is None
+
+    def test_none_obj_with_default(self):
+        assert _get(None, 'total_assets', 42) == 42
 
 
 class TestPct:
@@ -194,6 +204,12 @@ def _make_bank(**overrides):
         llr_mn=25_000,
         car_regulatory=14.3,
         car_bank_reported=None,
+        # Reported ratios
+        npl_ratio_reported=None,
+        coverage_ratio_reported=None,
+        roe_reported=None,
+        roa_reported=None,
+        cost_income_reported=None,
         # FX
         fx_rate_period_end=None,
         fx_rate_period_avg=None,
@@ -219,9 +235,14 @@ class TestCalculateAllRatios:
         assert abs(bank.debt_assets - 0.13) < 1e-9
 
     def test_debt_assets_no_debt(self):
-        bank = _make_bank(short_term_borrowings=0, long_term_debt=0)
+        bank = _make_bank(short_term_borrowings=None, long_term_debt=None)
         bank = calculate_all_ratios(bank)
         assert bank.debt_assets is None
+
+    def test_debt_assets_zero_debt(self):
+        bank = _make_bank(short_term_borrowings=0, long_term_debt=0)
+        bank = calculate_all_ratios(bank)
+        assert bank.debt_assets == 0.0
 
     def test_npl_ratio(self):
         bank = _make_bank(npls_mn=20_000, gross_loans=600_000)
@@ -308,6 +329,32 @@ class TestCalculateAllRatios:
         avg_equity = (140_000 + 100_000) / 2  # 120_000
         assert abs(bank.roaa - 10_000 / avg_assets) < 1e-9
         assert abs(bank.roae - 10_000 / avg_equity) < 1e-9
+
+    def test_npl_ratio_fallback_to_reported(self):
+        bank = _make_bank(npls_mn=None, gross_loans=600_000, npl_ratio_reported=5.2)
+        bank = calculate_all_ratios(bank)
+        assert abs(bank.npl_ratio - 0.052) < 1e-9
+
+    def test_roae_fallback_to_reported(self):
+        bank = _make_bank(net_income=None, net_profit=None, roe_reported=28.5)
+        bank = calculate_all_ratios(bank)
+        assert abs(bank.roae - 0.285) < 1e-9
+
+    def test_cost_to_income_fallback_to_reported(self):
+        bank = _make_bank(operating_expenses=None, operating_income=None, cost_income_reported=55.0)
+        bank = calculate_all_ratios(bank)
+        assert abs(bank.cost_to_income - 0.55) < 1e-9
+
+    def test_none_fields_produce_none_not_zero(self):
+        """Verify that missing data shows as None (N/A), not false 0.00%."""
+        bank = _make_bank(
+            npls_mn=None, gross_loans=600_000,
+            cash_reserves_requirements=None, due_from_banks=None, investment_securities=None,
+            npl_ratio_reported=None,
+        )
+        bank = calculate_all_ratios(bank)
+        assert bank.npl_ratio is None
+        assert bank.liquid_assets_total_assets is None
 
     def test_all_zeros_no_crash(self):
         bank = _make_bank(
@@ -595,4 +642,62 @@ class TestGenerateAnalysisParagraphs:
             ratings["management"], ratings["earnings"], ratings["liquidity"]
         )
         paragraphs = generate_analysis_paragraphs(bank, ratings)
-        assert "Banque Atlantique" in paragraphs["capital"]
+        # Analysis now returns lists of bullets; bank name appears in composite
+        composite_text = " ".join(paragraphs["composite"])
+        assert "Banque Atlantique" in composite_text
+
+    def test_evolution_bullets_added_with_all_banks(self):
+        """When all_banks is provided, evolution bullets reference trends."""
+        bank1 = _make_bank(fiscal_year="2021", total_assets=800_000, total_equity=90_000,
+                           gross_loans=500_000, deposits=600_000, net_income=8_000,
+                           npls_mn=25_000)
+        bank1 = calculate_all_ratios(bank1)
+
+        bank2 = _make_bank(fiscal_year="2023", total_assets=1_000_000, total_equity=120_000,
+                           gross_loans=600_000, deposits=700_000, net_income=10_000,
+                           npls_mn=20_000)
+        bank2 = calculate_all_ratios(bank2, prev_bank=bank1)
+
+        ratings = {
+            "capital": rate_capital(bank2),
+            "asset_quality": rate_asset_quality(bank2),
+            "management": rate_management(bank2),
+            "earnings": rate_earnings(bank2),
+            "liquidity": rate_liquidity(bank2),
+        }
+        ratings["composite"] = get_composite_rating(
+            ratings["capital"], ratings["asset_quality"],
+            ratings["management"], ratings["earnings"], ratings["liquidity"]
+        )
+        paragraphs = generate_analysis_paragraphs(bank2, ratings, all_banks=[bank1, bank2])
+
+        # Check that evolution bullets were added
+        capital_text = " ".join(paragraphs["capital"])
+        assert "2021" in capital_text
+        assert "2023" in capital_text
+
+        asset_text = " ".join(paragraphs["asset_quality"])
+        assert "NPL ratio" in asset_text and "2021" in asset_text
+
+        composite_text = " ".join(paragraphs["composite"])
+        assert "CAGR" in composite_text
+
+    def test_no_evolution_without_all_banks(self):
+        """Without all_banks, no evolution bullets are generated."""
+        bank = _make_bank()
+        bank = calculate_all_ratios(bank)
+        ratings = {
+            "capital": rate_capital(bank),
+            "asset_quality": rate_asset_quality(bank),
+            "management": rate_management(bank),
+            "earnings": rate_earnings(bank),
+            "liquidity": rate_liquidity(bank),
+        }
+        ratings["composite"] = get_composite_rating(
+            ratings["capital"], ratings["asset_quality"],
+            ratings["management"], ratings["earnings"], ratings["liquidity"]
+        )
+        paragraphs = generate_analysis_paragraphs(bank, ratings)
+        # No CAGR bullet should appear
+        composite_text = " ".join(paragraphs["composite"])
+        assert "CAGR" not in composite_text

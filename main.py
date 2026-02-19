@@ -3,6 +3,7 @@ import logging
 import time
 import threading
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -28,26 +29,57 @@ from camels_calculator import (
 from job_manager import create_job, get_job, process_job_async
 
 logger = logging.getLogger(__name__)
+logger.info("Starting CAMELS Analyzer API...")
 
 # ===== Config =====
 UPLOAD_FOLDER = os.getenv("UPLOAD_FOLDER", "uploads")
 MAX_UPLOAD_SIZE_MB = int(os.getenv("MAX_UPLOAD_SIZE_MB", "50"))
 ALLOWED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".xlsx", ".xls"}
 
-CORS_ORIGINS = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+CORS_ORIGINS = [o.strip().rstrip("/") for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",") if o.strip()]
 
 # Disable docs in production (set ENABLE_DOCS=true to enable)
 _enable_docs = os.getenv("ENABLE_DOCS", "false").lower() == "true"
 
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
+logger.info(f"CORS origins: {CORS_ORIGINS}")
+logger.info(f"Upload folder: {UPLOAD_FOLDER}")
+logger.info(f"Max upload size: {MAX_UPLOAD_SIZE_MB} MB")
+logger.info(f"Docs enabled: {_enable_docs}")
+
 # Thread pool to limit concurrent background jobs
 _job_executor = ThreadPoolExecutor(max_workers=4)
+
+# ===== Lifespan (runs init_db in background) =====
+
+_db_ready = False
+
+def _init_db_background():
+    """Run init_db in a background thread so it doesn't block startup."""
+    global _db_ready
+    try:
+        from init_db import init_database
+        init_database()
+        _db_ready = True
+        logger.info("Background DB init complete.")
+    except Exception as e:
+        logger.error(f"Background DB init failed: {e}")
+
+@asynccontextmanager
+async def lifespan(app):
+    """Start app immediately, init DB in background."""
+    threading.Thread(target=_init_db_background, daemon=True).start()
+    logger.info("Application startup complete (DB init running in background).")
+    yield
+    logger.info("Application shutting down.")
+
 
 # ===== App =====
 app = FastAPI(
     title="CAMELS Analyzer API",
     version="2.0.0",
+    lifespan=lifespan,
     docs_url="/docs" if _enable_docs else None,
     redoc_url="/redoc" if _enable_docs else None,
     openapi_url="/openapi.json" if _enable_docs else None,
@@ -55,9 +87,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in CORS_ORIGINS],
+    allow_origins=CORS_ORIGINS,
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -166,7 +198,8 @@ def home():
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    """Lightweight health check — returns immediately so Railway marks us healthy."""
+    return {"status": "ok", "database_ready": _db_ready}
 
 
 @app.post("/banks")
