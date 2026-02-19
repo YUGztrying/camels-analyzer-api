@@ -215,6 +215,90 @@ def extract_previous_period_data(
         return None
 
 
+def extract_all_periods_data(
+    user_id: str,
+    company_name: str,
+    type_institution: str = None,
+) -> tuple[list[dict], list[str], str]:
+    """
+    Extract financial data for ALL available periods in one DB query.
+
+    Returns (statements, periods, type_institution) where *statements* is a
+    list of flat dicts (one per period, sorted chronologically).
+    """
+    sb = get_client()
+    result = (
+        sb.table("financial_statements")
+        .select("statement_type, periods, line_items, type_institution")
+        .eq("user_id", user_id)
+        .eq("company_name", company_name)
+        .execute()
+    )
+    if not result.data:
+        raise ValueError(f"No financial statements found for {company_name}")
+
+    if not type_institution:
+        type_institution = result.data[0].get("type_institution", "banque")
+
+    # Union of all periods across statement types
+    all_periods: set[str] = set()
+    for row in result.data:
+        all_periods.update(row.get("periods", []))
+    all_periods_sorted = sorted(all_periods)  # chronological
+
+    mapping = get_mapping(type_institution)
+
+    statements: list[dict] = []
+    for period in all_periods_sorted:
+        unified_lookup: dict = {}
+        found = False
+        for row in result.data:
+            periods = row.get("periods", [])
+            if period not in periods:
+                continue
+            found = True
+            period_idx = periods.index(period)
+            line_items = row.get("line_items", [])
+            if not line_items:
+                continue
+            unified_lookup.update(_build_poste_lookup(line_items, period_idx))
+
+        if not found:
+            continue
+
+        data: dict = {}
+        for field_name, entry in mapping.items():
+            val = _resolve_mapping_entry(entry, unified_lookup)
+            if val is not None:
+                data[field_name] = val
+
+        data["bank_name"] = company_name
+        data["name"] = company_name
+        data["fiscal_year"] = period[:4]
+        data["period"] = period
+        data["currency"] = "XOF"
+        data["type_institution"] = type_institution
+        data = compute_derived_fields(data, type_institution)
+        statements.append(data)
+
+    return statements, all_periods_sorted, type_institution
+
+
+def period_label(period_str: str) -> str:
+    """Convert ISO date to short label: '2023-12-31' → 'FY23', '2024-06-30' → 'HY24'."""
+    month = int(period_str[5:7])
+    year = period_str[2:4]
+    if month == 12:
+        return f"FY{year}"
+    if month == 6:
+        return f"HY{year}"
+    if month == 3:
+        return f"Q1{year}"
+    if month == 9:
+        return f"Q3{year}"
+    return period_str
+
+
 def list_companies_for_user(user_id: str) -> list:
     """List companies available for a user, using the user_companies view."""
     sb = get_client()

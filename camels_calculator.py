@@ -558,7 +558,171 @@ def generate_analysis_paragraphs(statement: dict, ratios: dict, ratings: dict) -
 
 
 # ---------------------------------------------------------------------------
-# Convenience: run the full analysis pipeline
+# Multi-period helpers
+# ---------------------------------------------------------------------------
+
+def compute_cagr(first_value, last_value, n_years):
+    """Compound annual growth rate.  Returns None when inputs are unusable."""
+    if not first_value or first_value <= 0 or not last_value or last_value <= 0 or n_years <= 0:
+        return None
+    return (last_value / first_value) ** (1.0 / n_years) - 1
+
+
+def _compute_yoy_growth(current, previous):
+    if not previous or previous == 0 or current is None:
+        return None
+    return (current - previous) / abs(previous)
+
+
+def _years_between(first_period: str, last_period: str) -> float:
+    from datetime import date
+    d1 = date.fromisoformat(first_period)
+    d2 = date.fromisoformat(last_period)
+    return (d2 - d1).days / 365.25
+
+
+def run_multi_period_analysis(statements: list[dict], periods: list[str]) -> dict:
+    """
+    Run CAMELS analysis across *all* available periods.
+
+    Returns a dict with:
+      ratios_by_period  – list of ratio dicts (one per period)
+      ratings           – ratings based on the latest period
+      financial_summary – balance-sheet + income-statement rows
+      ratio_tables      – grouped ratio evolution rows
+      analysis          – deterministic paragraph per component
+    """
+    if not statements:
+        raise ValueError("No statement data available")
+
+    # 1. Ratios per period (using prior period for averaging)
+    ratios_by_period: list[dict] = []
+    for i, stmt in enumerate(statements):
+        prev = statements[i - 1] if i > 0 else None
+        ratios = calculate_all_ratios(stmt, prev)
+        # Growth rates
+        if prev:
+            ratios["total_asset_growth"] = _compute_yoy_growth(
+                _get(stmt, "total_assets"), _get(prev, "total_assets"))
+            ratios["gross_loan_growth"] = _compute_yoy_growth(
+                _get(stmt, "gross_loans"), _get(prev, "gross_loans"))
+            ratios["deposit_growth"] = _compute_yoy_growth(
+                _get(stmt, "deposits"), _get(prev, "deposits"))
+            ratios["equity_growth"] = _compute_yoy_growth(
+                _get(stmt, "total_equity"), _get(prev, "total_equity"))
+        else:
+            for k in ("total_asset_growth", "gross_loan_growth",
+                       "deposit_growth", "equity_growth"):
+                ratios[k] = None
+        ratios_by_period.append(ratios)
+
+    # 2. Ratings on latest period
+    latest = ratios_by_period[-1]
+    ratings = {
+        "capital": rate_capital(latest),
+        "asset_quality": rate_asset_quality(latest),
+        "management": rate_management(latest),
+        "earnings": rate_earnings(latest),
+        "liquidity": rate_liquidity(latest),
+    }
+    ratings["composite"] = get_composite_rating(
+        ratings["capital"], ratings["asset_quality"],
+        ratings["management"], ratings["earnings"], ratings["liquidity"],
+    )
+
+    # 3. Financial summary tables  ──────────────────────────────────
+    n_years = _years_between(periods[0], periods[-1]) if len(periods) > 1 else 0
+
+    def _summary_row(label, key, use_abs=False):
+        vals = []
+        for s in statements:
+            v = _get(s, key)
+            if use_abs and v:
+                v = abs(v)
+            vals.append(v if v else None)
+        first = abs(vals[0]) if vals[0] else 0
+        last = abs(vals[-1]) if vals[-1] else 0
+        cagr = compute_cagr(first, last, n_years) if n_years > 0 else None
+        return {"label": label, "key": key, "values": vals, "cagr": cagr}
+
+    # Compute non-interest income per period
+    for s in statements:
+        oi = _get(s, "operating_income")
+        nii = _get(s, "net_interest_income")
+        s["_non_interest_income"] = (oi - nii) if oi and nii else 0
+
+    financial_summary = {
+        "balance_sheet": [
+            _summary_row("Total Assets", "total_assets"),
+            _summary_row("Total Liabilities", "total_liabilities"),
+            _summary_row("Shareholders' Equity", "total_equity"),
+            _summary_row("Cash & Bank Deposits", "cash_reserves_requirements"),
+            _summary_row("Investment Securities", "investment_securities"),
+            _summary_row("Gross Loans", "gross_loans"),
+            _summary_row("Loan Loss Provisions", "loan_loss_provisions", use_abs=True),
+            _summary_row("Customer Deposits", "deposits"),
+            _summary_row("Borrowings", "short_term_borrowings"),
+            _summary_row("Subordinated Debt", "long_term_debt"),
+        ],
+        "income_statement": [
+            _summary_row("Net Interest Income", "net_interest_income"),
+            _summary_row("Non-Interest Income", "_non_interest_income"),
+            _summary_row("Operating Expenses", "operating_expenses"),
+            _summary_row("Cost of Risk", "provision_expenses"),
+            _summary_row("Net Profit", "net_income"),
+        ],
+    }
+
+    # 4. Ratio evolution tables  ──────────────────────────────────
+    def _ratio_row(label, key):
+        return {"label": label, "key": key,
+                "values": [r.get(key) for r in ratios_by_period]}
+
+    ratio_tables = {
+        "growth": [
+            _ratio_row("Total Asset Growth", "total_asset_growth"),
+            _ratio_row("Gross Loan Growth", "gross_loan_growth"),
+            _ratio_row("Deposit Growth", "deposit_growth"),
+            _ratio_row("Equity Growth", "equity_growth"),
+        ],
+        "solvency": [
+            _ratio_row("Equity / Assets", "equity_assets"),
+            _ratio_row("Debt / Assets", "debt_assets"),
+        ],
+        "asset_quality": [
+            _ratio_row("NPL Ratio", "npl_ratio"),
+            _ratio_row("Coverage Ratio", "coverage_ratio"),
+            _ratio_row("Cost of Risk / Avg Assets", "cost_of_risk_avg_assets"),
+        ],
+        "profitability": [
+            _ratio_row("ROAA", "roaa"),
+            _ratio_row("ROAE", "roae"),
+            _ratio_row("Cost-to-Income", "cost_to_income"),
+            _ratio_row("NII / Avg Assets", "net_interest_income_avg_assets"),
+            _ratio_row("Non-II / Avg Assets", "non_interest_income_avg_assets"),
+            _ratio_row("OpEx / Avg Assets", "opex_avg_assets"),
+            _ratio_row("Net Interest Margin", "net_interest_margin"),
+        ],
+        "liquidity": [
+            _ratio_row("Liquid Assets / Total Assets", "liquid_assets_total_assets"),
+            _ratio_row("Gross Loans / Deposits", "gross_loans_deposits"),
+        ],
+    }
+
+    # 5. Deterministic analysis (fallback — replaced by Claude narrative when available)
+    analysis = generate_analysis_paragraphs(statements[-1], latest, ratings)
+
+    return {
+        "ratios_by_period": ratios_by_period,
+        "ratings": ratings,
+        "financial_summary": financial_summary,
+        "ratio_tables": ratio_tables,
+        "analysis": analysis,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Convenience: run the full analysis pipeline (single period – kept for compat)
 # ---------------------------------------------------------------------------
 
 def run_full_analysis(statement: dict, prev_statement: dict = None) -> dict:
