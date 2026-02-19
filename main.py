@@ -11,13 +11,16 @@ from fastapi import FastAPI, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 
 from supabase_client import get_client
-from camels_calculator import run_full_analysis
+from camels_calculator import run_full_analysis, run_multi_period_analysis
 from statement_reader import (
     extract_statement_data,
+    extract_all_periods_data,
     extract_previous_period_data,
     list_companies_for_user,
     list_periods_for_company,
+    period_label,
 )
+from narrative_generator import generate_narrative
 
 logger = logging.getLogger(__name__)
 
@@ -109,95 +112,110 @@ def get_periods(company_name: str, user_id: str = None, authorization: str | Non
 @app.post("/analyze")
 def analyze(
     company_name: str,
-    period: str,
     user_id: str = None,
     authorization: str | None = Header(None),
 ):
     """
-    Run CAMELS analysis on a company for a specific period.
+    Run multi-period CAMELS analysis on a company (all available periods).
 
     Reads financial data from the Spreading App's financial_statements table,
-    maps poste codes to calculator fields, computes ratios/ratings,
-    saves results, and returns the full analysis.
+    computes ratios/ratings across every period, optionally generates a
+    Claude-powered narrative, and returns the full analysis.
     """
     uid = user_id or _get_user_id(authorization)
     if not uid:
         raise HTTPException(status_code=400, detail="user_id required")
 
-    # 1. Extract current period data from Spreading App's financial_statements
+    # 1. Extract ALL periods at once
     try:
-        statement = extract_statement_data(uid, company_name, period, type_institution=None)
+        statements, periods, type_inst = extract_all_periods_data(
+            uid, company_name, type_institution=None,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
-    type_inst = statement.get("type_institution", "banque")
+    if not statements:
+        raise HTTPException(status_code=404, detail="No period data found")
 
-    # 2. Try to get previous period for averaging
-    prev_statement = extract_previous_period_data(uid, company_name, period, type_inst)
-    if prev_statement:
-        logger.info(f"Found previous period data for averaging")
+    labels = [period_label(p) for p in periods]
+    logger.info(f"Analyzing {company_name}: {len(periods)} periods ({labels})")
 
-    # 3. Run CAMELS analysis
-    analysis_result = run_full_analysis(statement, prev_statement)
+    # 2. Run multi-period CAMELS analysis
+    result = run_multi_period_analysis(statements, periods)
 
-    # 4. Save to Supabase
+    # 3. Rich narrative via Claude (falls back to deterministic if unavailable)
+    narrative = generate_narrative(
+        company_name, type_inst, "XOF", labels,
+        statements, result["ratios_by_period"],
+        result["ratings"], result["financial_summary"],
+    )
+    analysis = narrative if narrative else result["analysis"]
+
+    # 4. Save latest-period snapshot to Supabase
+    latest_ratios = result["ratios_by_period"][-1]
+    latest_period = periods[-1]
     analysis_row = {
         "user_id": uid,
         "company_name": company_name,
-        "period": period,
+        "period": latest_period,
         "type_institution": type_inst,
-        **{k: v for k, v in analysis_result["ratios"].items()},
-        "capital_rating": analysis_result["ratings"]["capital"],
-        "asset_quality_rating": analysis_result["ratings"]["asset_quality"],
-        "management_rating": analysis_result["ratings"]["management"],
-        "earnings_rating": analysis_result["ratings"]["earnings"],
-        "liquidity_rating": analysis_result["ratings"]["liquidity"],
-        "composite_rating": analysis_result["ratings"]["composite"],
-        "analysis_capital": analysis_result["analysis"].get("capital"),
-        "analysis_asset_quality": analysis_result["analysis"].get("asset_quality"),
-        "analysis_management": analysis_result["analysis"].get("management"),
-        "analysis_earnings": analysis_result["analysis"].get("earnings"),
-        "analysis_liquidity": analysis_result["analysis"].get("liquidity"),
-        "analysis_composite": analysis_result["analysis"].get("composite"),
+        **{k: v for k, v in latest_ratios.items()
+           if k not in ("total_asset_growth", "gross_loan_growth",
+                        "deposit_growth", "equity_growth")},
+        "capital_rating": result["ratings"]["capital"],
+        "asset_quality_rating": result["ratings"]["asset_quality"],
+        "management_rating": result["ratings"]["management"],
+        "earnings_rating": result["ratings"]["earnings"],
+        "liquidity_rating": result["ratings"]["liquidity"],
+        "composite_rating": result["ratings"]["composite"],
+        "analysis_capital": analysis.get("capital", ""),
+        "analysis_asset_quality": analysis.get("asset_quality", ""),
+        "analysis_management": analysis.get("management", ""),
+        "analysis_earnings": analysis.get("earnings", ""),
+        "analysis_liquidity": analysis.get("liquidity", ""),
+        "analysis_composite": analysis.get("composite", ""),
     }
-
     try:
         sb = get_client()
         sb.table("camels_analyses").upsert(
             analysis_row, on_conflict="user_id,company_name,period"
         ).execute()
-        logger.info(f"Analysis saved for {company_name} / {period}")
+        logger.info(f"Analysis saved for {company_name} / {latest_period}")
     except Exception as e:
         logger.error(f"Failed to save analysis: {e}")
 
-    # 5. Return response
+    # 5. Build key_metrics from latest period
+    latest_stmt = statements[-1]
+    key_metrics = {
+        "total_assets": latest_stmt.get("total_assets"),
+        "total_equity": latest_stmt.get("total_equity"),
+        "net_income": latest_stmt.get("net_income"),
+        "gross_loans": latest_stmt.get("gross_loans"),
+        "deposits": latest_stmt.get("deposits"),
+        "equity_assets": latest_ratios.get("equity_assets"),
+        "debt_assets": latest_ratios.get("debt_assets"),
+        "npl_ratio": latest_ratios.get("npl_ratio"),
+        "coverage_ratio": latest_ratios.get("coverage_ratio"),
+        "cost_of_risk_avg_assets": latest_ratios.get("cost_of_risk_avg_assets"),
+        "cost_to_income": latest_ratios.get("cost_to_income"),
+        "roaa": latest_ratios.get("roaa"),
+        "roae": latest_ratios.get("roae"),
+        "liquid_assets_total_assets": latest_ratios.get("liquid_assets_total_assets"),
+        "gross_loans_deposits": latest_ratios.get("gross_loans_deposits"),
+    }
+
     return {
         "message": "Analysis complete",
         "company_name": company_name,
-        "period": period,
         "type_institution": type_inst,
         "currency": "XOF",
-        "extracted_data": statement,
-        "ratios": analysis_result["ratios"],
-        "ratings": analysis_result["ratings"],
-        "analysis": analysis_result["analysis"],
-        "key_metrics": {
-            "total_assets": statement.get("total_assets"),
-            "total_equity": statement.get("total_equity"),
-            "net_income": statement.get("net_income"),
-            "gross_loans": statement.get("gross_loans"),
-            "deposits": statement.get("deposits"),
-            "equity_assets": analysis_result["ratios"].get("equity_assets"),
-            "debt_assets": analysis_result["ratios"].get("debt_assets"),
-            "npl_ratio": analysis_result["ratios"].get("npl_ratio"),
-            "coverage_ratio": analysis_result["ratios"].get("coverage_ratio"),
-            "cost_of_risk_avg_assets": analysis_result["ratios"].get("cost_of_risk_avg_assets"),
-            "cost_to_income": analysis_result["ratios"].get("cost_to_income"),
-            "roaa": analysis_result["ratios"].get("roaa"),
-            "roae": analysis_result["ratios"].get("roae"),
-            "liquid_assets_total_assets": analysis_result["ratios"].get("liquid_assets_total_assets"),
-            "gross_loans_deposits": analysis_result["ratios"].get("gross_loans_deposits"),
-        },
+        "periods": periods,
+        "period_labels": labels,
+        "financial_summary": result["financial_summary"],
+        "ratio_tables": result["ratio_tables"],
+        "ratings": result["ratings"],
+        "analysis": analysis,
+        "key_metrics": key_metrics,
     }
 
 

@@ -2,7 +2,7 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
-  timeout: 30000,
+  timeout: 120000,
 });
 
 export const listCompanies = async (userId) => {
@@ -10,16 +10,9 @@ export const listCompanies = async (userId) => {
   return response.data;
 };
 
-export const listPeriods = async (companyName, userId) => {
-  const response = await api.get(`/companies/${encodeURIComponent(companyName)}/periods`, {
-    params: { user_id: userId },
-  });
-  return response.data;
-};
-
-export const analyzeCompany = async (companyName, period, userId) => {
+export const analyzeCompany = async (companyName, userId) => {
   const response = await api.post('/analyze', null, {
-    params: { company_name: companyName, period, user_id: userId },
+    params: { company_name: companyName, user_id: userId },
   });
   return response.data;
 };
